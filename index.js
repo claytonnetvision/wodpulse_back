@@ -7,7 +7,7 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 app.use(cors({
-  origin: '*',  // Temporário para testes (depois troque por ['https://seu-vercel.vercel.app'])
+  origin: '*',  // Temporário para testes – depois restrinja para o domínio do Vercel
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -41,7 +41,7 @@ app.use('/api/participants', require('./routes/participants'));
 // Rota para sessões (finalização de aula)
 const sessionsRouter = express.Router();
 
-// POST /api/sessions - Salva sessão com colunas reais da tabela
+// POST /api/sessions - Salva sessão com TODOS os campos que o frontend envia
 sessionsRouter.post('/', async (req, res) => {
   const { class_name, date_start, date_end, duration_minutes, box_id, participantsData } = req.body;
 
@@ -57,7 +57,7 @@ sessionsRouter.post('/', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Insere a sessão principal (colunas reais: sem duration_minutes se não quiser, mas você adicionou)
+    // Insere a sessão principal
     const sessionResult = await client.query(
       `INSERT INTO sessions (box_id, class_name, date_start, date_end, duration_minutes, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
@@ -67,30 +67,39 @@ sessionsRouter.post('/', async (req, res) => {
         class_name,
         date_start,
         date_end,
-        Number(duration_minutes) || null  // força número ou null
+        Number(duration_minutes) || null
       ]
     );
 
     const sessionId = sessionResult.rows[0].id;
     console.log('[SESSION] Sessão criada com ID:', sessionId);
 
-    // Insere resumo de cada aluno (somente colunas reais da tabela)
+    // Insere resumo de cada aluno (TODOS os campos que você quer salvar)
     for (const p of participantsData) {
       await client.query(
         `INSERT INTO session_participants (
           session_id, participant_id,
-          queima_points, calories, vo2_time_seconds, epoc_estimated,
-          real_resting_hr, avg_hr, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+          avg_hr,
+          min_gray, min_green, min_blue, min_yellow, min_orange, min_red,
+          trimp_total, calories_total, vo2_time_seconds, epoc_estimated,
+          real_resting_hr, max_hr_reached, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())`,
         [
           sessionId,
           p.participantId,
-          Number(p.trimp_total) || 0,          // queima_points = trimp_total do frontend
+          Number(p.avg_hr) || null,
+          Number(p.min_gray) || 0,
+          Number(p.min_green) || 0,
+          Number(p.min_blue) || 0,
+          Number(p.min_yellow) || 0,
+          Number(p.min_orange) || 0,
+          Number(p.min_red) || 0,
+          Number(p.trimp_total) || 0,
           Number(p.calories_total) || 0,
           Number(p.vo2_time_seconds) || 0,
           Number(p.epoc_estimated) || 0,
           Number(p.real_resting_hr) || null,
-          Number(p.avg_hr) || null
+          Number(p.max_hr_reached) || null
         ]
       );
     }
