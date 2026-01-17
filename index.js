@@ -6,7 +6,11 @@ const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3001;
 
-app.use(cors());
+app.use(cors({
+  origin: '*',  // Temporário para testes (depois restrinja para o domínio do Vercel)
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // Conexão com Neon PostgreSQL
@@ -41,7 +45,10 @@ const sessionsRouter = express.Router();
 sessionsRouter.post('/', async (req, res) => {
   const { class_name, date_start, date_end, duration_minutes, box_id, participantsData } = req.body;
 
+  console.log('[SESSION] Dados recebidos do frontend:', JSON.stringify(req.body, null, 2));
+
   if (!class_name || !date_start || !date_end || !participantsData || !participantsData.length) {
+    console.log('[SESSION] Dados incompletos detectados');
     return res.status(400).json({ error: 'Dados incompletos' });
   }
 
@@ -50,15 +57,22 @@ sessionsRouter.post('/', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Insere a sessão principal (usando date_start e date_end)
+    // Insere a sessão principal (agora com duration_minutes)
     const sessionResult = await client.query(
       `INSERT INTO sessions (box_id, class_name, date_start, date_end, duration_minutes, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING id`,
-      [box_id || 1, class_name, date_start, date_end, duration_minutes]
+      [
+        box_id || 1,
+        class_name,
+        date_start,
+        date_end,
+        Number(duration_minutes) || null   // ← força número ou null
+      ]
     );
 
     const sessionId = sessionResult.rows[0].id;
+    console.log('[SESSION] Sessão criada com ID:', sessionId);
 
     // Insere resumo de cada aluno
     for (const p of participantsData) {
@@ -72,18 +86,18 @@ sessionsRouter.post('/', async (req, res) => {
         [
           sessionId,
           p.participantId,
-          p.avg_hr || null,
-          p.min_gray || 0,
-          p.min_green || 0,
-          p.min_blue || 0,
-          p.min_yellow || 0,
-          p.min_orange || 0,
-          p.min_red || 0,
-          p.trimp_total || 0,
-          p.calories_total || 0,
-          p.vo2_time_seconds || 0,
-          p.epoc_estimated || 0,
-          p.real_resting_hr || null
+          Number(p.avg_hr) || null,
+          Number(p.min_gray) || 0,
+          Number(p.min_green) || 0,
+          Number(p.min_blue) || 0,
+          Number(p.min_yellow) || 0,
+          Number(p.min_orange) || 0,
+          Number(p.min_red) || 0,
+          Number(p.trimp_total) || 0,
+          Number(p.calories_total) || 0,
+          Number(p.vo2_time_seconds) || 0,
+          Number(p.epoc_estimated) || 0,
+          Number(p.real_resting_hr) || null
         ]
       );
     }
@@ -93,8 +107,10 @@ sessionsRouter.post('/', async (req, res) => {
     res.status(201).json({ success: true, sessionId });
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Erro ao salvar sessão:', err);
-    res.status(500).json({ error: 'Erro ao salvar sessão' });
+    console.error('Erro completo ao salvar sessão:', err.stack);
+    console.error('Mensagem do erro:', err.message);
+    console.error('Dados recebidos do frontend:', req.body);
+    res.status(500).json({ error: 'Erro ao salvar sessão', details: err.message });
   } finally {
     client.release();
   }
