@@ -7,11 +7,19 @@ const cron = require('node-cron');
 const app = express();
 const port = process.env.PORT || 3001;
 
+// CORS corrigido e explícito
 app.use(cors({
-  origin: '*',  // Temporário para testes – depois restrinja para o domínio do Vercel
+  origin: ['https://www.infrapower.com.br', 'http://localhost:3000'],  // seu domínio + localhost
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+
+// Handler explícito para OPTIONS (preflight)
+app.options('*', cors());
+
 app.use(express.json());
 
 // Conexão com Neon PostgreSQL
@@ -42,7 +50,7 @@ app.use('/api/participants', require('./routes/participants'));
 // Rota para sessões (finalização de aula)
 const sessionsRouter = express.Router();
 
-// POST /api/sessions - Salva sessão com TODOS os campos que o frontend envia
+// POST /api/sessions - Salva sessão com TODOS os campos
 sessionsRouter.post('/', async (req, res) => {
   const { class_name, date_start, date_end, duration_minutes, box_id, participantsData } = req.body;
 
@@ -58,7 +66,6 @@ sessionsRouter.post('/', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Insere a sessão principal
     const sessionResult = await client.query(
       `INSERT INTO sessions (box_id, class_name, date_start, date_end, duration_minutes, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
@@ -75,7 +82,6 @@ sessionsRouter.post('/', async (req, res) => {
     const sessionId = sessionResult.rows[0].id;
     console.log('[SESSION] Sessão criada com ID:', sessionId);
 
-    // Insere resumo de cada aluno (TODOS os campos que você quer)
     for (const p of participantsData) {
       await client.query(
         `INSERT INTO session_participants (
@@ -86,7 +92,7 @@ sessionsRouter.post('/', async (req, res) => {
         [
           sessionId,
           p.participantId,
-          Number(p.trimp_total) || 0,          // queima_points = trimp_total do frontend
+          Number(p.trimp_total) || 0,
           Number(p.calories_total) || 0,
           Number(p.vo2_time_seconds) || 0,
           Number(p.epoc_estimated) || 0,
@@ -120,21 +126,18 @@ cron.schedule('0 3 * * *', async () => {
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   try {
-    // Deleta sessões antigas
     const sessionsDeleted = await pool.query(
       'DELETE FROM sessions WHERE date_start < $1 RETURNING id',
       [thirtyDaysAgo]
     );
     console.log(`[CRON] Sessões deletadas: ${sessionsDeleted.rowCount}`);
 
-    // Deleta resumos de participantes antigas
     const spDeleted = await pool.query(
       'DELETE FROM session_participants WHERE created_at < $1 RETURNING id',
       [thirtyDaysAgo]
     );
     console.log(`[CRON] Resumos deletados: ${spDeleted.rowCount}`);
 
-    // Deleta medições de FC repouso antigas (se a tabela existir)
     try {
       const restingDeleted = await pool.query(
         'DELETE FROM resting_hr_measurements WHERE measured_at < $1 RETURNING id',
