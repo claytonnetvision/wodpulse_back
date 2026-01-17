@@ -38,6 +38,16 @@ pool.connect()
   .then(() => console.log('→ Conectado ao PostgreSQL (Neon)'))
   .catch(err => console.error('Erro ao conectar no banco:', err.stack));
 
+// Ping periódico para manter Neon acordado (plano free - evita suspensão)
+setInterval(async () => {
+  try {
+    await pool.query('SELECT 1');
+    console.log('[PING NEON] Sucesso: Banco mantido acordado - SELECT 1 executado');
+  } catch (err) {
+    console.error('[PING NEON] Falha ao manter banco acordado:', err.message);
+  }
+}, 4 * 60 * 1000); // 4 minutos (mais curto que o tempo de suspensão do Neon)
+
 // Rota de teste simples
 app.get('/', (req, res) => {
   res.json({ 
@@ -94,7 +104,7 @@ sessionsRouter.post('/', async (req, res) => {
     const sessionId = sessionResult.rows[0].id;
     console.log('[SESSION] Sessão criada com ID:', sessionId);
 
-    // Insere resumo de cada aluno (TODOS os campos que você quer)
+    // Insere resumo de cada aluno (TODOS os campos reais)
     for (const p of participantsData) {
       await client.query(
         `INSERT INTO session_participants (
@@ -141,41 +151,6 @@ sessionsRouter.post('/', async (req, res) => {
 });
 
 app.use('/api/sessions', sessionsRouter);
-
-// CRON JOB - Limpeza automática de dados antigos (>30 dias) - comentado por enquanto
-// cron.schedule('0 3 * * *', async () => {
-//   console.log('[CRON] Iniciando limpeza de dados antigos (>30 dias)...');
-//   const thirtyDaysAgo = new Date();
-//   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-//   try {
-//     const sessionsDeleted = await pool.query(
-//       'DELETE FROM sessions WHERE date_start < $1 RETURNING id',
-//       [thirtyDaysAgo]
-//     );
-//     console.log(`[CRON] Sessões deletadas: ${sessionsDeleted.rowCount}`);
-
-//     const spDeleted = await pool.query(
-//       'DELETE FROM session_participants WHERE created_at < $1 RETURNING id',
-//       [thirtyDaysAgo]
-//     );
-//     console.log(`[CRON] Resumos deletados: ${spDeleted.rowCount}`);
-
-//     try {
-//       const restingDeleted = await pool.query(
-//         'DELETE FROM resting_hr_measurements WHERE measured_at < $1 RETURNING id',
-//         [thirtyDaysAgo]
-//       );
-//       console.log(`[CRON] Medições de repouso deletadas: ${restingDeleted.rowCount}`);
-//     } catch (restingErr) {
-//       console.warn('[CRON] Tabela resting_hr_measurements não encontrada ou erro:', restingErr.message);
-//     }
-
-//     console.log('[CRON] Limpeza concluída com sucesso.');
-//   } catch (err) {
-//     console.error('[CRON] Erro durante a limpeza:', err.stack);
-//   }
-// });
 
 // Inicia o servidor
 app.listen(port, () => {
