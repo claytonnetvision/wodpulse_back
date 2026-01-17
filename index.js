@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-// const cron = require('node-cron');  // comentado temporariamente para teste
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -10,9 +9,9 @@ const port = process.env.PORT || 3001;
 // CORS explícito e seguro - libera apenas os domínios que você usa
 app.use(cors({
   origin: [
-    'https://www.infrapower.com.br',                     // seu domínio principal
-    'https://wodpulse-front-f2lo92fpz-robson-claytons-projects.vercel.app', // domínio do Vercel (se ainda usar)
-    'http://localhost:3000',                              // para testes locais
+    'https://www.infrapower.com.br',
+    'https://wodpulse-front-f2lo92fpz-robson-claytons-projects.vercel.app',
+    'http://localhost:3000',
     'http://127.0.0.1:3000'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -38,7 +37,7 @@ pool.connect()
   .then(() => console.log('→ Conectado ao PostgreSQL (Neon)'))
   .catch(err => console.error('Erro ao conectar no banco:', err.stack));
 
-// Ping periódico para manter Neon acordado (plano free - evita suspensão)
+// Ping periódico para manter Neon acordado (plano free)
 setInterval(async () => {
   try {
     await pool.query('SELECT 1');
@@ -46,7 +45,7 @@ setInterval(async () => {
   } catch (err) {
     console.error('[PING NEON] Falha ao manter banco acordado:', err.message);
   }
-}, 4 * 60 * 1000); // 4 minutos (mais curto que o tempo de suspensão do Neon)
+}, 4 * 60 * 1000); // 4 minutos
 
 // Rota de teste simples
 app.get('/', (req, res) => {
@@ -56,24 +55,23 @@ app.get('/', (req, res) => {
   });
 });
 
-// Rotas de autenticação
+// Rotas de autenticação (já existia)
 app.use('/api/auth', require('./routes/auth'));
 
-// Rota para participantes
+// Rota para participantes (já existia)
 app.use('/api/participants', require('./routes/participants'));
 
-// Rota para sessões (finalização de aula)
+// Rotas para sessões
 const sessionsRouter = express.Router();
 
-// POST /api/sessions - Salva sessão com TODOS os campos
+// POST /api/sessions - Salva sessão (já existia)
 sessionsRouter.post('/', async (req, res) => {
   const { class_name, date_start, date_end, duration_minutes, box_id, participantsData } = req.body;
 
   console.log('[SESSION] Dados recebidos do frontend:', JSON.stringify(req.body, null, 2));
 
-  // Validação mínima - permite participantsData vazio, mas avisa
   if (!class_name || !date_start || !date_end) {
-    console.log('[SESSION] Campos obrigatórios faltando (class_name/date_start/date_end)');
+    console.log('[SESSION] Campos obrigatórios faltando');
     return res.status(400).json({ error: 'Dados da sessão incompletos (class_name, date_start ou date_end)' });
   }
 
@@ -87,7 +85,6 @@ sessionsRouter.post('/', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Insere a sessão principal
     const sessionResult = await client.query(
       `INSERT INTO sessions (box_id, class_name, date_start, date_end, duration_minutes, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
@@ -104,7 +101,6 @@ sessionsRouter.post('/', async (req, res) => {
     const sessionId = sessionResult.rows[0].id;
     console.log('[SESSION] Sessão criada com ID:', sessionId);
 
-    // Insere resumo de cada aluno (TODOS os campos reais)
     for (const p of participantsData) {
       await client.query(
         `INSERT INTO session_participants (
@@ -141,15 +137,207 @@ sessionsRouter.post('/', async (req, res) => {
     res.status(201).json({ success: true, sessionId });
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Erro completo ao salvar sessão:', err.stack);
-    console.error('Mensagem do erro:', err.message);
-    console.error('Dados recebidos do frontend:', req.body);
+    console.error('Erro ao salvar sessão:', err.stack);
     res.status(500).json({ error: 'Erro ao salvar sessão', details: err.message });
   } finally {
     client.release();
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// NOVAS ROTAS GET (sem autenticação por enquanto)
+// ─────────────────────────────────────────────────────────────
+
+// GET /api/sessions - Lista sessões com filtros
+sessionsRouter.get('/', async (req, res) => {
+  const { start_date, end_date, participant_id, limit = 50 } = req.query;
+
+  let queryText = `
+    SELECT 
+      s.id,
+      s.class_name,
+      s.date_start,
+      s.date_end,
+      s.duration_minutes,
+      COUNT(sp.participant_id) AS participant_count
+    FROM sessions s
+    LEFT JOIN session_participants sp ON s.id = sp.session_id
+    WHERE 1=1
+  `;
+  const params = [];
+  let paramIndex = 1;
+
+  if (start_date) {
+    queryText += ` AND s.date_start >= $${paramIndex}`;
+    params.push(start_date);
+    paramIndex++;
+  }
+  if (end_date) {
+    queryText += ` AND s.date_end <= $${paramIndex}`;
+    params.push(end_date + ' 23:59:59');
+    paramIndex++;
+  }
+  if (participant_id) {
+    queryText += ` AND EXISTS (
+      SELECT 1 FROM session_participants sp2 
+      WHERE sp2.session_id = s.id AND sp2.participant_id = $${paramIndex}
+    )`;
+    params.push(Number(participant_id));
+    paramIndex++;
+  }
+
+  queryText += ` 
+    GROUP BY s.id 
+    ORDER BY s.date_start DESC 
+    LIMIT $${paramIndex}
+  `;
+  params.push(Number(limit) || 50);
+
+  try {
+    const result = await pool.query(queryText, params);
+    res.json({ sessions: result.rows });
+  } catch (err) {
+    console.error('Erro ao listar sessões:', err.stack);
+    res.status(500).json({ error: 'Erro interno ao buscar sessões' });
+  }
+});
+
+// GET /api/sessions/:id - Detalhes completos de uma sessão
+sessionsRouter.get('/:id', async (req, res) => {
+  const sessionId = req.params.id;
+
+  try {
+    const sessionRes = await pool.query(
+      `SELECT * FROM sessions WHERE id = $1`,
+      [sessionId]
+    );
+    if (sessionRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Sessão não encontrada' });
+    }
+
+    const participantsRes = await pool.query(
+      `SELECT 
+         sp.*,
+         p.name,
+         p.gender,
+         p.age,
+         p.weight,
+         p.height_cm
+       FROM session_participants sp
+       JOIN participants p ON sp.participant_id = p.id
+       WHERE sp.session_id = $1`,
+      [sessionId]
+    );
+
+    res.json({
+      session: sessionRes.rows[0],
+      participants: participantsRes.rows
+    });
+  } catch (err) {
+    console.error('Erro ao buscar sessão detalhada:', err.stack);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// GET /api/participants/:id/history - Histórico de um aluno
+sessionsRouter.get('/participants/:id/history', async (req, res) => {
+  const participantId = req.params.id;
+  const { limit = 10 } = req.query;
+
+  try {
+    const history = await pool.query(
+      `SELECT 
+         s.id AS session_id,
+         s.class_name,
+         s.date_start,
+         s.date_end,
+         sp.queima_points,
+         sp.calories_total AS calories,
+         sp.vo2_time_seconds,
+         sp.avg_hr,
+         sp.max_hr_reached,
+         sp.min_red
+       FROM session_participants sp
+       JOIN sessions s ON sp.session_id = s.id
+       WHERE sp.participant_id = $1
+       ORDER BY s.date_start DESC
+       LIMIT $2`,
+      [participantId, Number(limit)]
+    );
+
+    res.json({ history: history.rows });
+  } catch (err) {
+    console.error('Erro ao buscar histórico do participante:', err.stack);
+    res.status(500).json({ error: 'Erro ao buscar histórico' });
+  }
+});
+
+// GET /api/rankings/weekly - Ranking semanal (por métrica)
+sessionsRouter.get('/rankings/weekly', async (req, res) => {
+  const { week_start, metric = 'queima_points', gender, limit = 20 } = req.query;
+
+  let monday;
+  if (week_start) {
+    monday = week_start;
+  } else {
+    const today = new Date();
+    const day = today.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    monday = new Date(today);
+    monday.setDate(today.getDate() + diff);
+    monday = monday.toISOString().split('T')[0];
+  }
+
+  const nextMonday = new Date(monday);
+  nextMonday.setDate(nextMonday.getDate() + 7);
+  const nextMondayStr = nextMonday.toISOString().split('T')[0];
+
+  let queryText = `
+    SELECT 
+      p.id,
+      p.name,
+      p.gender,
+      SUM(sp.queima_points) AS total_queima_points,
+      SUM(sp.calories_total) AS total_calories,
+      SUM(sp.vo2_time_seconds) AS total_vo2_seconds
+    FROM session_participants sp
+    JOIN sessions s ON sp.session_id = s.id
+    JOIN participants p ON sp.participant_id = p.id
+    WHERE s.date_start >= $1 
+      AND s.date_start < $2
+  `;
+  const params = [monday, nextMondayStr];
+
+  if (gender) {
+    queryText += ` AND p.gender = $${params.length + 1}`;
+    params.push(gender);
+  }
+
+  let orderBy;
+  if (metric === 'calories') orderBy = 'total_calories';
+  else if (metric === 'vo2') orderBy = 'total_vo2_seconds';
+  else orderBy = 'total_queima_points';
+
+  queryText += `
+    GROUP BY p.id, p.name, p.gender
+    ORDER BY ${orderBy} DESC
+    LIMIT $${params.length + 1}
+  `;
+  params.push(Number(limit));
+
+  try {
+    const result = await pool.query(queryText, params);
+    res.json({
+      week_start: monday,
+      rankings: result.rows
+    });
+  } catch (err) {
+    console.error('Erro no ranking semanal:', err.stack);
+    res.status(500).json({ error: 'Erro ao calcular ranking' });
+  }
+});
+
+// Monta o router de sessions
 app.use('/api/sessions', sessionsRouter);
 
 // Inicia o servidor
