@@ -7,7 +7,7 @@ const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// CORS corrigido e explícito para seu domínio real
+// CORS explícito e seguro - libera apenas os domínios que você usa
 app.use(cors({
   origin: [
     'https://www.infrapower.com.br',                     // seu domínio principal
@@ -61,9 +61,15 @@ sessionsRouter.post('/', async (req, res) => {
 
   console.log('[SESSION] Dados recebidos do frontend:', JSON.stringify(req.body, null, 2));
 
-  if (!class_name || !date_start || !date_end || !participantsData || !participantsData.length) {
-    console.log('[SESSION] Dados incompletos detectados');
-    return res.status(400).json({ error: 'Dados incompletos' });
+  // Validação mínima - permite participantsData vazio, mas avisa
+  if (!class_name || !date_start || !date_end) {
+    console.log('[SESSION] Campos obrigatórios faltando (class_name/date_start/date_end)');
+    return res.status(400).json({ error: 'Dados da sessão incompletos (class_name, date_start ou date_end)' });
+  }
+
+  if (!participantsData || !Array.isArray(participantsData)) {
+    console.log('[SESSION] participantsData inválido ou vazio - salvando aula sem alunos');
+    participantsData = [];
   }
 
   const client = await pool.connect();
@@ -88,7 +94,7 @@ sessionsRouter.post('/', async (req, res) => {
     const sessionId = sessionResult.rows[0].id;
     console.log('[SESSION] Sessão criada com ID:', sessionId);
 
-    // Insere resumo de cada aluno (TODOS os campos reais)
+    // Insere resumo de cada aluno (TODOS os campos que você quer)
     for (const p of participantsData) {
       await client.query(
         `INSERT INTO session_participants (
