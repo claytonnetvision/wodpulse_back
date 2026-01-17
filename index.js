@@ -272,6 +272,14 @@ sessionsRouter.get('/participants/:id/history', async (req, res) => {
   }
 });
 
+// DEBUG: Rota para confirmar que o deploy pegou as mudanças (remova depois)
+app.get('/api/debug-test', (req, res) => {
+  res.json({ 
+    message: 'Deploy atualizado com sucesso - rota debug OK',
+    time: new Date().toISOString()
+  });
+});
+
 // GET /api/rankings/weekly - Ranking semanal (por métrica)
 sessionsRouter.get('/rankings/weekly', async (req, res) => {
   const { week_start, metric = 'queima_points', gender, limit = 20 } = req.query;
@@ -333,11 +341,11 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
     });
   } catch (err) {
     console.error('Erro no ranking semanal:', err.stack);
-    res.status(500).json({ error: 'Erro ao calcular ranking' });
+    res.status(500).json({ error: 'Erro ao calcular ranking', details: err.message });
   }
 });
 
-// Monta o router de sessions
+// Monta o router de sessions (deve ser o último!)
 app.use('/api/sessions', sessionsRouter);
 
 // Inicia o servidor
