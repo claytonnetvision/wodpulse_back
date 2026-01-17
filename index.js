@@ -74,7 +74,7 @@ sessionsRouter.post('/', async (req, res) => {
     const sessionId = sessionResult.rows[0].id;
     console.log('[SESSION] Sessão criada com ID:', sessionId);
 
-    // Insere resumo de cada aluno (TODOS os campos que você quer salvar)
+    // Insere resumo de cada aluno (TODOS os campos que você quer)
     for (const p of participantsData) {
       await client.query(
         `INSERT INTO session_participants (
