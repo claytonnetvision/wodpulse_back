@@ -55,16 +55,16 @@ app.get('/', (req, res) => {
   });
 });
 
-// Rotas de autenticação (já existia)
+// Rotas de autenticação
 app.use('/api/auth', require('./routes/auth'));
 
-// Rota para participantes (já existia)
+// Rota para participantes
 app.use('/api/participants', require('./routes/participants'));
 
 // Rotas para sessões
 const sessionsRouter = express.Router();
 
-// POST /api/sessions - Salva sessão (já existia)
+// POST /api/sessions - Salva sessão
 sessionsRouter.post('/', async (req, res) => {
   const { class_name, date_start, date_end, duration_minutes, box_id, participantsData } = req.body;
 
@@ -143,10 +143,6 @@ sessionsRouter.post('/', async (req, res) => {
     client.release();
   }
 });
-
-// ─────────────────────────────────────────────────────────────
-// NOVAS ROTAS GET (sem autenticação por enquanto)
-// ─────────────────────────────────────────────────────────────
 
 // GET /api/sessions - Lista sessões com filtros
 sessionsRouter.get('/', async (req, res) => {
@@ -272,7 +268,20 @@ sessionsRouter.get('/participants/:id/history', async (req, res) => {
   }
 });
 
-// DEBUG: Rota para confirmar que o deploy pegou as mudanças (remova depois)
+// NOVA ROTA: Apagar TODAS as aulas (sessions + participações)
+sessionsRouter.delete('/delete-all', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM session_participants');
+    await pool.query('DELETE FROM sessions');
+    console.log('[DELETE ALL] Todas as sessões e participações apagadas com sucesso');
+    res.json({ success: true, message: 'Todas as aulas apagadas' });
+  } catch (err) {
+    console.error('[DELETE ALL] Erro ao apagar tudo:', err.stack);
+    res.status(500).json({ error: 'Erro ao apagar aulas', details: err.message });
+  }
+});
+
+// DEBUG: Rota para confirmar deploy
 app.get('/api/debug-test', (req, res) => {
   res.json({ 
     message: 'Deploy atualizado com sucesso - rota debug OK',
@@ -280,7 +289,7 @@ app.get('/api/debug-test', (req, res) => {
   });
 });
 
-// GET /api/rankings/weekly - Ranking semanal (por métrica)
+// GET /api/rankings/weekly - Ranking semanal
 sessionsRouter.get('/rankings/weekly', async (req, res) => {
   const { week_start, metric = 'queima_points', gender, limit = 20 } = req.query;
 
@@ -349,7 +358,7 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
   }
 });
 
-// NOVA ROTA 1: Ranking acumulado por aluno (total de todas as aulas)
+// Ranking acumulado por aluno
 app.get('/api/participants/ranking-acumulado', async (req, res) => {
   const { alunoId, inicio, fim } = req.query;
 
@@ -400,7 +409,7 @@ app.get('/api/participants/ranking-acumulado', async (req, res) => {
   }
 });
 
-// NOVA ROTA 2: Histórico detalhado por aula
+// Histórico detalhado por aula
 app.get('/api/sessions/historico', async (req, res) => {
   const { alunoId, inicio, fim } = req.query;
 
@@ -456,7 +465,7 @@ app.get('/api/sessions/historico', async (req, res) => {
   }
 });
 
-// Monta o router de sessions (deve ser o último!)
+// Monta o router de sessions
 app.use('/api/sessions', sessionsRouter);
 
 // Inicia o servidor
