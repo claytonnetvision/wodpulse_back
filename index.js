@@ -239,7 +239,7 @@ sessionsRouter.get('/:id', async (req, res) => {
   }
 });
 
-// GET /api/participants/:id/history - Histórico de um aluno
+// GET /api/participants/:id/history - Histórico de um aluno (corrigido com todos os campos)
 sessionsRouter.get('/participants/:id/history', async (req, res) => {
   const participantId = req.params.id;
   const { limit = 10 } = req.query;
@@ -251,12 +251,16 @@ sessionsRouter.get('/participants/:id/history', async (req, res) => {
          s.class_name,
          s.date_start,
          s.date_end,
+         s.duration_minutes,
          sp.queima_points,
-         sp.calories_total AS calories,
+         sp.calories_total,
          sp.vo2_time_seconds,
          sp.avg_hr,
          sp.max_hr_reached,
-         sp.min_red
+         sp.min_red,
+         sp.trimp_total,
+         sp.epoc_estimated,
+         sp.real_resting_hr
        FROM session_participants sp
        JOIN sessions s ON sp.session_id = s.id
        WHERE sp.participant_id = $1
@@ -280,7 +284,7 @@ app.get('/api/debug-test', (req, res) => {
   });
 });
 
-// GET /api/rankings/weekly - Ranking semanal (por métrica)
+// GET /api/rankings/weekly - Ranking semanal (por métrica) - ADICIONADO max_hr_reached e trimp_total
 sessionsRouter.get('/rankings/weekly', async (req, res) => {
   const { week_start, metric = 'queima_points', gender, limit = 20 } = req.query;
 
@@ -307,7 +311,9 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
       p.gender,
       SUM(sp.queima_points) AS total_queima_points,
       SUM(sp.calories_total) AS total_calories,
-      SUM(sp.vo2_time_seconds) AS total_vo2_seconds
+      SUM(sp.vo2_time_seconds) AS total_vo2_seconds,
+      SUM(sp.trimp_total) AS total_trimp,
+      MAX(sp.max_hr_reached) AS max_hr_reached
     FROM session_participants sp
     JOIN sessions s ON sp.session_id = s.id
     JOIN participants p ON sp.participant_id = p.id
@@ -324,6 +330,7 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
   let orderBy;
   if (metric === 'calories') orderBy = 'total_calories';
   else if (metric === 'vo2') orderBy = 'total_vo2_seconds';
+  else if (metric === 'maxhr') orderBy = 'max_hr_reached';
   else orderBy = 'total_queima_points';
 
   queryText += `
@@ -342,6 +349,113 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
   } catch (err) {
     console.error('Erro no ranking semanal:', err.stack);
     res.status(500).json({ error: 'Erro ao calcular ranking', details: err.message });
+  }
+});
+
+// NOVA ROTA: Ranking acumulado por aluno (total de todas as aulas)
+sessionsRouter.get('/participants/ranking-acumulado', async (req, res) => {
+  const { alunoId, inicio, fim } = req.query;
+
+  let query = `
+    SELECT 
+      p.name AS aluno,
+      COUNT(DISTINCT sp.session_id) AS qtd_aulas,
+      SUM(sp.calories_total) AS total_calorias,
+      SUM(sp.vo2_time_seconds) AS total_vo2_seg,
+      AVG(sp.avg_hr) AS fc_media_geral,
+      MAX(sp.max_hr_reached) AS fc_max_geral,
+      SUM(sp.min_red) AS total_tempo_vermelho_min,
+      SUM(sp.queima_points) AS total_queima_points,
+      AVG(sp.trimp_total) AS trimp_medio,
+      AVG(sp.epoc_estimated) AS epoc_medio
+    FROM participants p
+    LEFT JOIN session_participants sp ON sp.participant_id = p.id
+    LEFT JOIN sessions s ON s.id = sp.session_id
+    WHERE 1=1
+  `;
+  const params = [];
+  let paramIndex = 1;
+
+  if (alunoId) {
+    query += ` AND p.id = $${paramIndex}`;
+    params.push(alunoId);
+    paramIndex++;
+  }
+  if (inicio) {
+    query += ` AND s.date_start >= $${paramIndex}`;
+    params.push(inicio);
+    paramIndex++;
+  }
+  if (fim) {
+    query += ` AND s.date_start <= $${paramIndex}`;
+    params.push(fim);
+    paramIndex++;
+  }
+
+  query += ` GROUP BY p.name ORDER BY total_calorias DESC`;
+
+  try {
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao buscar ranking acumulado' });
+  }
+});
+
+// NOVA ROTA: Histórico detalhado por aula (com todos os campos)
+sessionsRouter.get('/sessions/historico', async (req, res) => {
+  const { alunoId, inicio, fim } = req.query;
+
+  let query = `
+    SELECT 
+      s.id AS id_sessao,
+      s.class_name,
+      s.date_start,
+      s.date_end,
+      s.duration_minutes,
+      p.name AS aluno,
+      sp.calories_total,
+      sp.vo2_time_seconds,
+      sp.avg_hr,
+      sp.max_hr_reached,
+      sp.min_red,
+      sp.queima_points,
+      sp.trimp_total,
+      sp.epoc_estimated,
+      sp.real_resting_hr
+    FROM sessions s
+    JOIN session_participants sp ON sp.session_id = s.id
+    JOIN participants p ON p.id = sp.participant_id
+    WHERE 1=1
+  `;
+  const params = [];
+  let paramIndex = 1;
+
+  if (alunoId) {
+    query += ` AND p.id = $${paramIndex}`;
+    params.push(alunoId);
+    paramIndex++;
+  }
+  if (inicio) {
+    query += ` AND s.date_start >= $${paramIndex}`;
+    params.push(inicio);
+    paramIndex++;
+  }
+  if (fim) {
+    query += ` AND s.date_start <= $${paramIndex}`;
+    params.push(fim);
+    paramIndex++;
+  }
+
+  query += ` ORDER BY s.date_start DESC`;
+
+  try {
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao buscar histórico' });
   }
 });
 
