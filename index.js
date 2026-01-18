@@ -239,7 +239,7 @@ sessionsRouter.get('/:id', async (req, res) => {
   }
 });
 
-// GET /api/participants/:id/history - Histórico de um aluno (corrigido com todos os campos)
+// GET /api/participants/:id/history - Histórico de um aluno
 sessionsRouter.get('/participants/:id/history', async (req, res) => {
   const participantId = req.params.id;
   const { limit = 10 } = req.query;
@@ -251,16 +251,12 @@ sessionsRouter.get('/participants/:id/history', async (req, res) => {
          s.class_name,
          s.date_start,
          s.date_end,
-         s.duration_minutes,
          sp.queima_points,
-         sp.calories_total,
+         sp.calories_total AS calories,
          sp.vo2_time_seconds,
          sp.avg_hr,
          sp.max_hr_reached,
-         sp.min_red,
-         sp.trimp_total,
-         sp.epoc_estimated,
-         sp.real_resting_hr
+         sp.min_red
        FROM session_participants sp
        JOIN sessions s ON sp.session_id = s.id
        WHERE sp.participant_id = $1
@@ -284,7 +280,7 @@ app.get('/api/debug-test', (req, res) => {
   });
 });
 
-// GET /api/rankings/weekly - Ranking semanal (por métrica) - ADICIONADO max_hr_reached e trimp_total
+// GET /api/rankings/weekly - Ranking semanal (por métrica)
 sessionsRouter.get('/rankings/weekly', async (req, res) => {
   const { week_start, metric = 'queima_points', gender, limit = 20 } = req.query;
 
@@ -312,8 +308,8 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
       SUM(sp.queima_points) AS total_queima_points,
       SUM(sp.calories_total) AS total_calories,
       SUM(sp.vo2_time_seconds) AS total_vo2_seconds,
-      SUM(sp.trimp_total) AS total_trimp,
-      MAX(sp.max_hr_reached) AS max_hr_reached
+      MAX(sp.max_hr_reached) AS max_hr_reached,
+      SUM(sp.trimp_total) AS total_trimp
     FROM session_participants sp
     JOIN sessions s ON sp.session_id = s.id
     JOIN participants p ON sp.participant_id = p.id
@@ -331,6 +327,7 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
   if (metric === 'calories') orderBy = 'total_calories';
   else if (metric === 'vo2') orderBy = 'total_vo2_seconds';
   else if (metric === 'maxhr') orderBy = 'max_hr_reached';
+  else if (metric === 'trimp') orderBy = 'total_trimp';
   else orderBy = 'total_queima_points';
 
   queryText += `
@@ -352,8 +349,8 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
   }
 });
 
-// NOVA ROTA: Ranking acumulado por aluno (total de todas as aulas)
-sessionsRouter.get('/participants/ranking-acumulado', async (req, res) => {
+// NOVA ROTA 1: Ranking acumulado por aluno (total de todas as aulas)
+app.get('/api/participants/ranking-acumulado', async (req, res) => {
   const { alunoId, inicio, fim } = req.query;
 
   let query = `
@@ -398,13 +395,13 @@ sessionsRouter.get('/participants/ranking-acumulado', async (req, res) => {
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error('Erro no ranking acumulado:', err);
     res.status(500).json({ error: 'Erro ao buscar ranking acumulado' });
   }
 });
 
-// NOVA ROTA: Histórico detalhado por aula (com todos os campos)
-sessionsRouter.get('/sessions/historico', async (req, res) => {
+// NOVA ROTA 2: Histórico detalhado por aula
+app.get('/api/sessions/historico', async (req, res) => {
   const { alunoId, inicio, fim } = req.query;
 
   let query = `
@@ -454,7 +451,7 @@ sessionsRouter.get('/sessions/historico', async (req, res) => {
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error('Erro no histórico detalhado:', err);
     res.status(500).json({ error: 'Erro ao buscar histórico' });
   }
 });
