@@ -113,21 +113,21 @@ sessionsRouter.post('/', async (req, res) => {
         [
           sessionId,
           p.participantId,
-          Number(p.queima_points) || 0,
+          Number(p.queimaPoints) || 0,          // ALTERADO AQUI: de queima_points → queimaPoints
           Number(p.calories) || 0,
-          Number(p.vo2_time_seconds) || 0,
-          Number(p.epoc_estimated) || 0,
-          Number(p.real_resting_hr) || null,
-          Number(p.avg_hr) || null,
-          Number(p.max_hr_reached) || null,
-          Number(p.min_gray) || 0,
-          Number(p.min_green) || 0,
-          Number(p.min_blue) || 0,
-          Number(p.min_yellow) || 0,
-          Number(p.min_orange) || 0,
-          Number(p.min_red) || 0,
-          Number(p.trimp_total) || 0,
-          Number(p.calories_total) || 0
+          Number(p.vo2TimeSeconds) || 0,        // ALTERADO AQUI: de vo2_time_seconds → vo2TimeSeconds
+          Number(p.epocEstimated) || 0,         // ALTERADO AQUI: de epoc_estimated → epocEstimated
+          Number(p.realRestingHR) || null,      // ALTERADO AQUI: tentativa de nome compatível com frontend
+          Number(p.avgHR) || null,              // ALTERADO AQUI: de avg_hr → avgHR
+          Number(p.maxHRReached) || null,       // ALTERADO AQUI: de max_hr_reached → maxHRReached
+          Number(p.minGray) || 0,
+          Number(p.minGreen) || 0,
+          Number(p.minBlue) || 0,
+          Number(p.minYellow) || 0,
+          Number(p.minOrange) || 0,
+          Number(p.minRed) || 0,
+          Number(p.trimpPoints) || 0,           // ALTERADO AQUI: de trimp_total → trimpPoints
+          Number(p.calories) || 0               // mantido (calories_total usa calories por enquanto)
         ]
       );
     }
