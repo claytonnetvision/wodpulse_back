@@ -1,41 +1,29 @@
-// backend/utils/email.js
 const nodemailer = require('nodemailer');
 
-function createTransporter() {
-  // Configuração HostGator - porta 465 (SSL) é geralmente mais confiável que 25
-  return nodemailer.createTransport({
-    host: 'ns1234.hostgator.com',
-    port: 465,
-    secure: true,                    // true para 465 (SSL)
-    auth: {
-      user: process.env.EMAIL_USER || 'contato@cfv6.com.br',
-      pass: process.env.EMAIL_PASS || 'Academiacross@12',
-    },
-    debug: process.env.NODE_ENV !== 'production',   // logs detalhados em dev
-    logger: true,
-  });
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST,
+  port: Number(process.env.EMAIL_PORT),
+  secure: process.env.EMAIL_SECURE === 'true', // true para 465
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+  // tls: { rejectUnauthorized: false } // só se der erro de certificado auto-assinado
+});
 
-  // Alternativa futura (Resend / Brevo / Amazon SES) pode ser adicionada aqui
-}
-
-async function sendEmail(to, subject, html, text = null) {
-  const transporter = createTransporter();
-
+async function sendEmail(to, subject, html) {
   try {
     const info = await transporter.sendMail({
-      from: `"V6 WODPulse" <${process.env.EMAIL_USER || 'contato@cfv6.com.br'}>`,
+      from: `"V6 WODPulse" <${process.env.EMAIL_USER}>`,
       to,
       subject,
-      text: text || 'Versão em texto simples não disponível',
       html,
     });
-
-    console.log(`[EMAIL OK] Enviado para ${to} → ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
+    console.log(`Email enviado: ${info.messageId} para ${to}`);
+    return true;
   } catch (err) {
-    console.error(`[EMAIL ERRO] Falha para ${to}:`, err.message);
-    if (err.response) console.error('Resposta SMTP:', err.response);
-    return { success: false, error: err.message };
+    console.error('Erro ao enviar email:', err.message);
+    return false;
   }
 }
 

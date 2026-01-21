@@ -133,11 +133,15 @@ sessionsRouter.post('/', async (req, res) => {
     }
 
     await client.query('COMMIT');
-// Envia e-mails em background (não trava a resposta)
-const { sendSummaryEmailsAfterClass } = require('./jobs/send-class-summary-email');
-sendSummaryEmailsAfterClass(sessionId)
-  .catch(err => console.error(`[EMAIL ASYNC] Falha na sessão ${sessionId}:`, err));
-  
+
+    // Envia e-mails em background (não trava a resposta HTTP para o frontend)
+    // Isso roda após o COMMIT, então a sessão já está salva no banco
+    const { sendSummaryEmailsAfterClass } = require('./jobs/send-class-summary-email');
+    sendSummaryEmailsAfterClass(sessionId)
+      .catch(err => {
+        console.error(`[EMAIL ASYNC] Falha ao enviar e-mails para sessão ${sessionId}:`, err.message || err);
+      });
+
     res.status(201).json({ success: true, sessionId });
   } catch (err) {
     await client.query('ROLLBACK');
