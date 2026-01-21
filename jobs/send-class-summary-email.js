@@ -8,7 +8,7 @@ const pool = new Pool({
 });
 
 // Configuração do transporter (lê do .env)
-const transporter = nodemailer.createTransport({
+const transporter = nodemailer.createTransporter({
   host: process.env.EMAIL_HOST || 'ns1234.hostgator.com',
   port: Number(process.env.EMAIL_PORT) || 465,
   secure: process.env.EMAIL_SECURE === 'true' || true, // true para porta 465
@@ -139,6 +139,10 @@ async function sendSummaryEmailsAfterClass(sessionId) {
     th, td { padding: 12px; text-align: center; border: 1px solid #ddd; }
     th { background: #FF9800; color: white; }
     .comment { margin: 25px 0; padding: 20px; background: #fff8e1; border-left: 5px solid #FF9800; border-radius: 6px; }
+    .metrics-info { margin: 25px 0; padding: 20px; background: #f0f8ff; border-left: 5px solid #2196F3; border-radius: 6px; }
+    .metrics-info h4 { margin-top: 0; color: #2196F3; }
+    .metrics-info ul { margin: 10px 0; padding-left: 20px; font-size: 14px; }
+    .metrics-info li { margin-bottom: 8px; }
     .footer { text-align: center; padding: 20px; font-size: 14px; color: #777; border-top: 1px solid #eee; }
     .improvement { color: #4CAF50; font-weight: bold; }
     @media (max-width: 600px) { .container { margin: 10px; } }
@@ -253,6 +257,17 @@ async function sendSummaryEmailsAfterClass(sessionId) {
             : aluno.queima_points > prev.queima_points + 5 
               ? 'Você melhorou bastante em relação ao último treino! Consistência é tudo — parabéns!' 
               : 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'}
+      </div>
+
+      <div class="metrics-info">
+        <h4>Entenda suas métricas</h4>
+        <ul>
+          <li><strong>EPOC (Dívida de Oxigênio Pós-Treino):</strong> É o consumo extra de oxigênio que seu corpo usa após o treino para se recuperar, queimando calorias mesmo em repouso. Benefício: Aumenta o metabolismo basal e melhora a recuperação muscular — quanto maior, melhor sua adaptação ao treino!</li>
+          <li><strong>VO₂ Máx:</strong> Mede o tempo em que você atinge o pico de consumo de oxigênio (92%+ da FC máxima). Benefício: Treina o sistema aeróbico de elite, aumentando resistência e performance em WODs longos, como sprints ou AMRAPs.</li>
+          <li><strong>Zona Vermelha:</strong> FC acima de 90% da máxima — zona anaeróbica intensa, onde você usa glicogênio rápido para explosões de energia. Benefício: Desenvolve fibras musculares rápidas, melhora velocidade e força máxima, ideal para CrossFit de alta intensidade (mas use com moderação para evitar fadiga).</li>
+          <li><strong>Frequência Cardíaca (FC):</strong> Inclui FC média, máxima e repouso — monitora a intensidade e recuperação do coração. Benefício: Ajuda a personalizar treinos, otimizar zonas de queima de gordura e prevenir overtraining; FC repouso baixa indica bom condicionamento cardiovascular.</li>
+          <li><strong>Queima Points:</strong> Pontos personalizados baseados em TRIMP e calorias, medindo a "carga de treino" total. Benefício: Motiva progresso semanal, rastreando eficiência energética e adaptação ao CrossFit — mais pontos = treino mais produtivo!</li>
+        </ul>
       </div>
 
       <p style="text-align: center; margin-top: 30px;">
