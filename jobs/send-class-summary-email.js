@@ -59,7 +59,8 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         sp.avg_hr,
         sp.max_hr_reached,
         sp.trimp_total,
-        sp.epoc_estimated
+        sp.epoc_estimated,
+        sp.real_resting_hr
       FROM session_participants sp
       JOIN participants p ON p.id = sp.participant_id
       WHERE sp.session_id = $1
@@ -83,7 +84,11 @@ async function sendSummaryEmailsAfterClass(sessionId) {
           sp.calories_total AS calories,
           sp.queima_points,
           sp.vo2_time_seconds,
-          sp.min_red
+          sp.min_red,
+          sp.max_hr_reached,
+          sp.real_resting_hr,
+          sp.trimp_total,
+          sp.epoc_estimated
         FROM session_participants sp
         JOIN sessions s ON s.id = sp.session_id
         WHERE sp.participant_id = $1
@@ -96,8 +101,23 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         calories: 0,
         queima_points: 0,
         vo2_time_seconds: 0,
-        min_red: 0
+        min_red: 0,
+        max_hr_reached: 0,
+        real_resting_hr: null,
+        trimp_total: 0,
+        epoc_estimated: 0
       };
+
+      // Cálculo de percentual de melhora na FC máxima (exemplo de intensidade)
+      const melhoraFcMaxPct = prev.max_hr_reached > 0 
+        ? Math.round(((aluno.max_hr_reached - prev.max_hr_reached) / prev.max_hr_reached) * 100) 
+        : 0;
+
+      // Frase divertida: calorias equivalentes a pão de queijo (~80 kcal cada)
+      const paesDeQueijo = Math.round(aluno.calories / 80);
+      const caloriasDivertido = paesDeQueijo > 0 
+        ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
+        : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
       // HTML do e-mail (responsivo, bonito, com cores do V6)
       const html = `
@@ -120,6 +140,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
     th { background: #FF9800; color: white; }
     .comment { margin: 25px 0; padding: 20px; background: #fff8e1; border-left: 5px solid #FF9800; border-radius: 6px; }
     .footer { text-align: center; padding: 20px; font-size: 14px; color: #777; border-top: 1px solid #eee; }
+    .improvement { color: #4CAF50; font-weight: bold; }
     @media (max-width: 600px) { .container { margin: 10px; } }
   </style>
 </head>
@@ -136,11 +157,15 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 
       <h3>Desempenho de hoje</h3>
       <div class="metric">🔥 Calorias queimadas: <span class="highlight">${Math.round(aluno.calories)} kcal</span></div>
+      <div class="metric">${caloriasDivertido}</div>
       <div class="metric">Queima Points: <span class="highlight">${Math.round(aluno.queima_points)}</span></div>
       <div class="metric">Tempo na Zona Vermelha: <span class="highlight">${Math.round(aluno.min_red)} min</span></div>
-      <div class="metric">Tempo em VO₂: <span class="highlight">${Math.round(aluno.vo2_time_seconds / 60)} min</span></div>
+      <div class="metric">Tempo em VO₂ Máx: <span class="highlight">${Math.round(aluno.vo2_time_seconds / 60)} min</span></div>
+      <div class="metric">TRIMP Total: <span class="highlight">${Number(aluno.trimp_total || 0).toFixed(1)}</span></div>
+      <div class="metric">EPOC Estimado: <span class="highlight">${Math.round(aluno.epoc_estimated || 0)} kcal</span></div>
       <div class="metric">FC Média: <span class="highlight">${Math.round(aluno.avg_hr || 0)} bpm</span></div>
       <div class="metric">FC Máxima atingida: <span class="highlight">${Math.round(aluno.max_hr_reached || 0)} bpm</span></div>
+      <div class="metric">FC Repouso real: <span class="highlight">${Math.round(aluno.real_resting_hr || '--')} bpm</span></div>
 
       <h3>Comparativo com o treino anterior</h3>
       <table>
@@ -172,6 +197,49 @@ async function sendSummaryEmailsAfterClass(sessionId) {
           <td>${Math.round(prev.min_red)}</td>
           <td style="color: ${aluno.min_red > prev.min_red ? '#4CAF50' : '#f44336'}">
             ${aluno.min_red > prev.min_red ? '+' : ''}${Math.round(aluno.min_red - prev.min_red)}
+          </td>
+        </tr>
+        <tr>
+          <td>FC Máxima (bpm)</td>
+          <td>${Math.round(aluno.max_hr_reached || 0)}</td>
+          <td>${Math.round(prev.max_hr_reached || 0)}</td>
+          <td style="color: ${aluno.max_hr_reached > prev.max_hr_reached ? '#4CAF50' : '#f44336'}">
+            ${aluno.max_hr_reached > prev.max_hr_reached ? '+' : ''}${Math.round(aluno.max_hr_reached - prev.max_hr_reached)}
+            ${melhoraFcMaxPct > 0 ? ` <span class="improvement">(+${melhoraFcMaxPct}% mais intenso!)</span>` : ''}
+          </td>
+        </tr>
+        <tr>
+          <td>FC Repouso (bpm)</td>
+          <td>${Math.round(aluno.real_resting_hr || '--')}</td>
+          <td>${Math.round(prev.real_resting_hr || '--')}</td>
+          <td style="color: ${aluno.real_resting_hr && prev.real_resting_hr && aluno.real_resting_hr < prev.real_resting_hr ? '#4CAF50' : '#f44336'}">
+            ${aluno.real_resting_hr && prev.real_resting_hr 
+              ? (aluno.real_resting_hr < prev.real_resting_hr ? 'Melhorou (mais baixa)' : 'Aumentou') 
+              : '--'}
+          </td>
+        </tr>
+        <tr>
+          <td>Tempo VO₂ (min)</td>
+          <td>${Math.round(aluno.vo2_time_seconds / 60)}</td>
+          <td>${Math.round(prev.vo2_time_seconds / 60)}</td>
+          <td style="color: ${aluno.vo2_time_seconds > prev.vo2_time_seconds ? '#4CAF50' : '#f44336'}">
+            ${aluno.vo2_time_seconds > prev.vo2_time_seconds ? '+' : ''}${Math.round((aluno.vo2_time_seconds - prev.vo2_time_seconds) / 60)}
+          </td>
+        </tr>
+        <tr>
+          <td>TRIMP Total</td>
+          <td>${Number(aluno.trimp_total || 0).toFixed(1)}</td>
+          <td>${Number(prev.trimp_total || 0).toFixed(1)}</td>
+          <td style="color: ${aluno.trimp_total > prev.trimp_total ? '#4CAF50' : '#f44336'}">
+            ${aluno.trimp_total > prev.trimp_total ? '+' : ''}${Number(aluno.trimp_total - prev.trimp_total).toFixed(1)}
+          </td>
+        </tr>
+        <tr>
+          <td>EPOC Estimado (kcal)</td>
+          <td>${Math.round(aluno.epoc_estimated || 0)}</td>
+          <td>${Math.round(prev.epoc_estimated || 0)}</td>
+          <td style="color: ${aluno.epoc_estimated > prev.epoc_estimated ? '#4CAF50' : '#f44336'}">
+            ${aluno.epoc_estimated > prev.epoc_estimated ? '+' : ''}${Math.round(aluno.epoc_estimated - prev.epoc_estimated)}
           </td>
         </tr>
       </table>
