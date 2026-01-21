@@ -8,7 +8,7 @@ const pool = new Pool({
 });
 
 // Configuração do transporter (lê do .env)
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'ns1234.hostgator.com',
   port: Number(process.env.EMAIL_PORT) || 465,
   secure: process.env.EMAIL_SECURE === 'true' || true, // true para porta 465
@@ -118,6 +118,61 @@ async function sendSummaryEmailsAfterClass(sessionId) {
       const caloriasDivertido = paesDeQueijo > 0 
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
+
+      // === INTEGRAÇÃO GEMINI PARA COMENTÁRIO PERSONALIZADO ===
+      let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
+
+      try {
+        const geminiResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{
+                  text: `Você é um treinador experiente de CrossFit. Analise esses dados da aula de hoje e gere um comentário técnico, motivacional e positivo de 4 a 6 linhas. Destaque melhora, intensidade, recuperação e dê 1 dica prática pro próximo treino. Use tom encorajador e linguagem simples.
+
+                  Dados de hoje:
+                  - Calorias: ${Math.round(aluno.calories)} kcal
+                  - Queima Points: ${Math.round(aluno.queima_points)}
+                  - Zona Vermelha: ${Math.round(aluno.min_red)} min
+                  - Tempo VO₂: ${Math.round(aluno.vo2_time_seconds / 60)} min
+                  - TRIMP: ${Number(aluno.trimp_total || 0).toFixed(1)}
+                  - EPOC: ${Math.round(aluno.epoc_estimated || 0)} kcal
+                  - FC Média: ${Math.round(aluno.avg_hr || 0)} bpm
+                  - FC Máxima: ${Math.round(aluno.max_hr_reached || 0)} bpm
+                  - FC Repouso: ${Math.round(aluno.real_resting_hr || 0)} bpm
+
+                  Dados do treino anterior:
+                  - Calorias: ${Math.round(prev.calories)}
+                  - Queima Points: ${Math.round(prev.queima_points)}
+                  - Zona Vermelha: ${Math.round(prev.min_red)} min
+                  - FC Máxima: ${Math.round(prev.max_hr_reached || 0)} bpm
+
+                  Nome do aluno: ${aluno.name.split(' ')[0]}
+                  Data da aula: ${classDate}`
+                }]
+              }],
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 150
+              }
+            })
+          }
+        );
+
+        const json = await geminiResponse.json();
+
+        if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
+          comentarioIA = json.candidates[0].content.parts[0].text.trim();
+          console.log(`[GEMINI OK] Comentário gerado para ${aluno.name}: ${comentarioIA.substring(0, 100)}...`);
+        } else {
+          console.warn(`[GEMINI] Resposta inválida para ${aluno.name}`);
+        }
+      } catch (err) {
+        console.error(`[GEMINI ERRO] Falha para ${aluno.name}:`, err.message);
+      }
 
       // HTML do e-mail (responsivo, bonito, com cores do V6)
       const html = `
@@ -249,14 +304,8 @@ async function sendSummaryEmailsAfterClass(sessionId) {
       </table>
 
       <div class="comment">
-        <strong>Comentário do dia:</strong><br><br>
-        ${aluno.min_red > 10 
-          ? 'Você passou bastante tempo na zona vermelha! Isso é excelente para fortalecer o coração e aumentar a capacidade cardiovascular.' 
-          : aluno.vo2_time_seconds > 180 
-            ? 'Ótimo desempenho em VO₂! Continue assim para melhorar sua resistência e performance geral.' 
-            : aluno.queima_points > prev.queima_points + 5 
-              ? 'Você melhorou bastante em relação ao último treino! Consistência é tudo — parabéns!' 
-              : 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'}
+        <strong>Comentário do treinador (com ajuda da IA):</strong><br><br>
+        ${comentarioIA}
       </div>
 
       <div class="metrics-info">
@@ -269,12 +318,6 @@ async function sendSummaryEmailsAfterClass(sessionId) {
           <li><strong>Queima Points:</strong> Pontos personalizados baseados em TRIMP e calorias, medindo a "carga de treino" total. Benefício: Motiva progresso semanal, rastreando eficiência energética e adaptação ao CrossFit — mais pontos = treino mais produtivo!</li>
         </ul>
       </div>
-
-      <p style="text-align: center; margin-top: 30px;">
-        <a href="https://seu-dominio.com" style="color: #FF9800; text-decoration: none; font-weight: bold;">
-          Acesse o WODPulse para ver todos os detalhes
-        </a>
-      </p>
     </div>
 
     <div class="footer">
