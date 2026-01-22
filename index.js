@@ -135,7 +135,6 @@ sessionsRouter.post('/', async (req, res) => {
     await client.query('COMMIT');
 
     // Envia e-mails em background (não trava a resposta HTTP para o frontend)
-    // Isso roda após o COMMIT, então a sessão já está salva no banco
     const { sendSummaryEmailsAfterClass } = require('./jobs/send-class-summary-email');
     sendSummaryEmailsAfterClass(sessionId)
       .catch(err => {
@@ -470,6 +469,76 @@ app.get('/api/sessions/historico', async (req, res) => {
   } catch (err) {
     console.error('Erro no histórico detalhado:', err);
     res.status(500).json({ error: 'Erro ao buscar histórico' });
+  }
+});
+
+// ROTA DE TESTE PARA GEMINI (com logs extras para debug)
+app.get('/test-gemini', async (req, res) => {
+  console.log('[TEST-GEMINI] Rota acessada - iniciando teste');
+
+  try {
+    console.log('[TEST-GEMINI] Verificando se a chave GEMINI_API_KEY existe no environment...');
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('GEMINI_API_KEY não encontrada no environment variables');
+    }
+    console.log('[TEST-GEMINI] Chave encontrada (não mostro o valor por segurança)');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 segundos de timeout
+
+    console.log('[TEST-GEMINI] Preparando request para Gemini API...');
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: 'Teste simples: responda apenas com "Gemini está funcionando perfeitamente!" se tudo estiver ok.' }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 50
+          }
+        })
+      }
+    );
+
+    clearTimeout(timeoutId);
+
+    console.log('[TEST-GEMINI] Resposta HTTP recebida com status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[TEST-GEMINI] Erro HTTP da API:', response.status, errorText);
+      throw new Error(`Gemini retornou erro HTTP ${response.status}: ${errorText}`);
+    }
+
+    const json = await response.json();
+    console.log('[TEST-GEMINI] JSON completo da resposta:', JSON.stringify(json, null, 2));
+
+    const textoResposta = json.candidates?.[0]?.content?.parts?.[0]?.text || 'Sem texto na resposta';
+
+    console.log('[TEST-GEMINI] Texto gerado pela IA:', textoResposta);
+
+    res.json({
+      success: true,
+      resposta: textoResposta,
+      status: response.status,
+      jsonCompleto: json
+    });
+  } catch (err) {
+    console.error('[TEST-GEMINI] Erro completo no teste:', err.message);
+    if (err.name === 'AbortError') {
+      console.error('[TEST-GEMINI] Timeout: Gemini demorou mais de 10 segundos');
+    }
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      stack: err.stack ? err.stack.substring(0, 500) : 'Sem stack'
+    });
   }
 });
 
