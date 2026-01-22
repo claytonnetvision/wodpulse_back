@@ -85,10 +85,11 @@ async function sendSummaryEmailsAfterClass(sessionId) {
           sp.queima_points,
           sp.vo2_time_seconds,
           sp.min_red,
+          sp.avg_hr,
           sp.max_hr_reached,
-          sp.real_resting_hr,
           sp.trimp_total,
-          sp.epoc_estimated
+          sp.epoc_estimated,
+          sp.real_resting_hr
         FROM session_participants sp
         JOIN sessions s ON s.id = sp.session_id
         WHERE sp.participant_id = $1
@@ -102,10 +103,11 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         queima_points: 0,
         vo2_time_seconds: 0,
         min_red: 0,
+        avg_hr: 0,
         max_hr_reached: 0,
-        real_resting_hr: null,
         trimp_total: 0,
-        epoc_estimated: 0
+        epoc_estimated: 0,
+        real_resting_hr: null
       };
 
       // Cálculo de percentual de melhora na FC máxima (exemplo de intensidade)
@@ -126,7 +128,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         console.log(`[GEMINI] Iniciando avaliação para ${aluno.name} (session ${sessionId})`);
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // Aumentado para 15s
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // Timeout de 15 segundos
 
         console.log(`[GEMINI DEBUG] Enviando request para aluno ${aluno.name}`);
 
@@ -139,32 +141,37 @@ async function sendSummaryEmailsAfterClass(sessionId) {
             body: JSON.stringify({
               contents: [{
                 parts: [{
-                  text: `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e gere um comentário técnico, motivacional e positivo de 4 a 6 linhas. Destaque melhora, intensidade, recuperação e dê 1 dica prática pro próximo treino. Use tom encorajador e linguagem simples. Não corte o texto, escreva o comentário completo mesmo que precise de mais tokens.
+                  text: `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e do treino anterior e gere um comentário técnico, motivacional e positivo de 4 a 6 linhas completas. Destaque melhora ou piora no comparativo, intensidade da aula, recuperação e dê 1 dica prática pro próximo treino. Use tom encorajador e linguagem simples. Não corte o texto, escreva o comentário completo mesmo que precise de mais espaço.
 
                   Dados de hoje:
                   - Calorias: ${Math.round(aluno.calories)} kcal
                   - Queima Points: ${Math.round(aluno.queima_points)}
                   - Zona Vermelha: ${Math.round(aluno.min_red)} min
-                  - Tempo VO₂: ${Math.round(aluno.vo2_time_seconds / 60)} min
-                  - TRIMP: ${Number(aluno.trimp_total || 0).toFixed(1)}
-                  - EPOC: ${Math.round(aluno.epoc_estimated || 0)} kcal
+                  - Tempo VO₂ Máx: ${Math.round(aluno.vo2_time_seconds / 60)} min
+                  - TRIMP Total: ${Number(aluno.trimp_total || 0).toFixed(1)}
+                  - EPOC Estimado (queima pós-treino): ${Math.round(aluno.epoc_estimated || 0)} kcal
                   - FC Média: ${Math.round(aluno.avg_hr || 0)} bpm
-                  - FC Máxima: ${Math.round(aluno.max_hr_reached || 0)} bpm
-                  - FC Repouso: ${Math.round(aluno.real_resting_hr || 0)} bpm
+                  - FC Máxima atingida: ${Math.round(aluno.max_hr_reached || 0)} bpm
+                  - FC Repouso real: ${Math.round(aluno.real_resting_hr || 0)} bpm
 
-                  Dados do treino anterior:
-                  - Calorias: ${Math.round(prev.calories)}
+                  Dados do treino anterior (comparativo):
+                  - Calorias: ${Math.round(prev.calories)} kcal
                   - Queima Points: ${Math.round(prev.queima_points)}
                   - Zona Vermelha: ${Math.round(prev.min_red)} min
-                  - FC Máxima: ${Math.round(prev.max_hr_reached || 0)} bpm
+                  - Tempo VO₂ Máx: ${Math.round(prev.vo2_time_seconds / 60)} min
+                  - TRIMP Total: ${Number(prev.trimp_total || 0).toFixed(1)}
+                  - EPOC Estimado (queima pós-treino): ${Math.round(prev.epoc_estimated || 0)} kcal
+                  - FC Média: ${Math.round(prev.avg_hr || 0)} bpm
+                  - FC Máxima atingida: ${Math.round(prev.max_hr_reached || 0)} bpm
+                  - FC Repouso real: ${Math.round(prev.real_resting_hr || 0)} bpm
 
                   Nome do aluno: ${aluno.name.split(' ')[0]}
-                  Data da aula: ${classDate}`
+                  Data da aula de hoje: ${classDate}`
                 }]
               }],
               generationConfig: {
                 temperature: 0.7,
-                maxOutputTokens: 8192  // ILIMITADO (máximo permitido no Flash)
+                maxOutputTokens: 8192  // máximo permitido - texto completo sem corte
               }
             })
           }
@@ -184,14 +191,14 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 
         if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
           comentarioIA = json.candidates[0].content.parts[0].text.trim();
-          console.log(`[GEMINI OK] Comentário gerado para ${aluno.name}: ${comentarioIA.substring(0, 200)}...`);
+          console.log(`[GEMINI OK] Comentário completo gerado para ${aluno.name}: ${comentarioIA.substring(0, 300)}...`);
         } else {
           console.warn(`[GEMINI] Resposta inválida para ${aluno.name} - usando fallback`);
         }
       } catch (err) {
         console.error(`[GEMINI ERRO] Falha para ${aluno.name}: ${err.message}`);
         if (err.name === 'AbortError') {
-          console.error('[GEMINI] Timeout: Gemini demorou mais de 15 segundos');
+          console.error('[GEMINI] Timeout: Gemini demorou mais de 20 segundos');
         }
       }
 
