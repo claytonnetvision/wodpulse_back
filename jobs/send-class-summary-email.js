@@ -20,21 +20,6 @@ const transporter = nodemailer.createTransport({
   logger: true,
 });
 
-// Contador de requests diário para Gemini (free tier: ~1500/dia, usamos margem de 1200)
-let geminiRequestsHoje = 0;
-let ultimoDia = new Date().toDateString();
-const LIMITE_DIARIO_GEMINI = 1200; // margem segura (80% do free tier)
-
-// Função auxiliar para reset diário
-function resetGeminiContadorSeNecessario() {
-  const hoje = new Date().toDateString();
-  if (hoje !== ultimoDia) {
-    console.log(`[GEMINI LIMIT] Reset diário: total requests ontem = ${geminiRequestsHoje}`);
-    geminiRequestsHoje = 0;
-    ultimoDia = hoje;
-  }
-}
-
 /**
  * Envia e-mail de resumo personalizado para cada participante da sessão
  * @param {number} sessionId ID da sessão que acabou de terminar
@@ -134,89 +119,79 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
-      // Reset contador diário se mudou o dia
-      resetGeminiContadorSeNecessario();
-
-      // === INTEGRAÇÃO GEMINI COM LIMITE DIÁRIO ===
+      // === INTEGRAÇÃO GEMINI ===
       let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
 
-      if (geminiRequestsHoje >= LIMITE_DIARIO_GEMINI) {
-        console.log(`[GEMINI LIMIT] Limite diário atingido (${geminiRequestsHoje}/${LIMITE_DIARIO_GEMINI}) - usando fallback para ${aluno.name}`);
-      } else {
-        geminiRequestsHoje++;
-        console.log(`[GEMINI LIMIT] Requests hoje: ${geminiRequestsHoje}/${LIMITE_DIARIO_GEMINI} - avaliando ${aluno.name}`);
+      try {
+        console.log(`[GEMINI] Iniciando avaliação para ${aluno.name} (session ${sessionId})`);
 
-        try {
-          console.log(`[GEMINI] Iniciando avaliação para ${aluno.name} (session ${sessionId})`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // Aumentado para 15s
 
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // Timeout de 10 segundos
+        console.log(`[GEMINI DEBUG] Enviando request para aluno ${aluno.name}`);
 
-          console.log(`[GEMINI DEBUG] Enviando request para aluno ${aluno.name}`);
+        const geminiResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [{
+                parts: [{
+                  text: `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e gere um comentário técnico, motivacional e positivo de 4 a 6 linhas. Destaque melhora, intensidade, recuperação e dê 1 dica prática pro próximo treino. Use tom encorajador e linguagem simples. Não corte o texto, escreva o comentário completo mesmo que precise de mais tokens.
 
-          const geminiResponse = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              signal: controller.signal,
-              body: JSON.stringify({
-                contents: [{
-                  parts: [{
-                    text: `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e gere um comentário técnico, motivacional e positivo de 4 a 6 linhas. Destaque melhora, intensidade, recuperação e dê 1 dica prática pro próximo treino. Use tom encorajador e linguagem simples. Não corte o texto, escreva completo.
+                  Dados de hoje:
+                  - Calorias: ${Math.round(aluno.calories)} kcal
+                  - Queima Points: ${Math.round(aluno.queima_points)}
+                  - Zona Vermelha: ${Math.round(aluno.min_red)} min
+                  - Tempo VO₂: ${Math.round(aluno.vo2_time_seconds / 60)} min
+                  - TRIMP: ${Number(aluno.trimp_total || 0).toFixed(1)}
+                  - EPOC: ${Math.round(aluno.epoc_estimated || 0)} kcal
+                  - FC Média: ${Math.round(aluno.avg_hr || 0)} bpm
+                  - FC Máxima: ${Math.round(aluno.max_hr_reached || 0)} bpm
+                  - FC Repouso: ${Math.round(aluno.real_resting_hr || 0)} bpm
 
-                    Dados de hoje:
-                    - Calorias: ${Math.round(aluno.calories)} kcal
-                    - Queima Points: ${Math.round(aluno.queima_points)}
-                    - Zona Vermelha: ${Math.round(aluno.min_red)} min
-                    - Tempo VO₂: ${Math.round(aluno.vo2_time_seconds / 60)} min
-                    - TRIMP: ${Number(aluno.trimp_total || 0).toFixed(1)}
-                    - EPOC: ${Math.round(aluno.epoc_estimated || 0)} kcal
-                    - FC Média: ${Math.round(aluno.avg_hr || 0)} bpm
-                    - FC Máxima: ${Math.round(aluno.max_hr_reached || 0)} bpm
-                    - FC Repouso: ${Math.round(aluno.real_resting_hr || 0)} bpm
+                  Dados do treino anterior:
+                  - Calorias: ${Math.round(prev.calories)}
+                  - Queima Points: ${Math.round(prev.queima_points)}
+                  - Zona Vermelha: ${Math.round(prev.min_red)} min
+                  - FC Máxima: ${Math.round(prev.max_hr_reached || 0)} bpm
 
-                    Dados do treino anterior:
-                    - Calorias: ${Math.round(prev.calories)}
-                    - Queima Points: ${Math.round(prev.queima_points)}
-                    - Zona Vermelha: ${Math.round(prev.min_red)} min
-                    - FC Máxima: ${Math.round(prev.max_hr_reached || 0)} bpm
-
-                    Nome do aluno: ${aluno.name.split(' ')[0]}
-                    Data da aula: ${classDate}`
-                  }]
-                }],
-                generationConfig: {
-                  temperature: 0.7,
-                  maxOutputTokens: 400  // aumentado para texto completo
-                }
-              })
-            }
-          );
-
-          clearTimeout(timeoutId);
-
-          console.log(`[GEMINI DEBUG] Resposta HTTP recebida para ${aluno.name}: status ${geminiResponse.status}`);
-
-          if (!geminiResponse.ok) {
-            const errorText = await geminiResponse.text();
-            throw new Error(`Gemini HTTP ${geminiResponse.status}: ${errorText}`);
+                  Nome do aluno: ${aluno.name.split(' ')[0]}
+                  Data da aula: ${classDate}`
+                }]
+              }],
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 8192  // ILIMITADO (máximo permitido no Flash)
+              }
+            })
           }
+        );
 
-          const json = await geminiResponse.json();
-          console.log(`[GEMINI DEBUG] JSON completo da resposta para ${aluno.name}:`, JSON.stringify(json, null, 2));
+        clearTimeout(timeoutId);
 
-          if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
-            comentarioIA = json.candidates[0].content.parts[0].text.trim();
-            console.log(`[GEMINI OK] Comentário gerado para ${aluno.name}: ${comentarioIA.substring(0, 100)}...`);
-          } else {
-            console.warn(`[GEMINI] Resposta inválida para ${aluno.name} - usando fallback`);
-          }
-        } catch (err) {
-          console.error(`[GEMINI ERRO] Falha para ${aluno.name}: ${err.message}`);
-          if (err.name === 'AbortError') {
-            console.error('[GEMINI] Timeout: Gemini demorou mais de 10 segundos');
-          }
+        console.log(`[GEMINI DEBUG] Resposta HTTP recebida para ${aluno.name}: status ${geminiResponse.status}`);
+
+        if (!geminiResponse.ok) {
+          const errorText = await geminiResponse.text();
+          throw new Error(`Gemini HTTP ${geminiResponse.status}: ${errorText}`);
+        }
+
+        const json = await geminiResponse.json();
+        console.log(`[GEMINI DEBUG] JSON completo da resposta para ${aluno.name}:`, JSON.stringify(json, null, 2));
+
+        if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
+          comentarioIA = json.candidates[0].content.parts[0].text.trim();
+          console.log(`[GEMINI OK] Comentário gerado para ${aluno.name}: ${comentarioIA.substring(0, 200)}...`);
+        } else {
+          console.warn(`[GEMINI] Resposta inválida para ${aluno.name} - usando fallback`);
+        }
+      } catch (err) {
+        console.error(`[GEMINI ERRO] Falha para ${aluno.name}: ${err.message}`);
+        if (err.name === 'AbortError') {
+          console.error('[GEMINI] Timeout: Gemini demorou mais de 15 segundos');
         }
       }
 
