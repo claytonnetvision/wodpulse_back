@@ -119,19 +119,25 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
-      // === INTEGRAÇÃO GEMINI PARA COMENTÁRIO PERSONALIZADO ===
+      // === INTEGRAÇÃO GEMINI - AGORA COM TIMEOUT E ESPERA CORRETA ===
       let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
 
       try {
+        console.log(`[GEMINI] Iniciando avaliação para ${aluno.name}`);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000); // Timeout de 8 segundos
+
         const geminiResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
             body: JSON.stringify({
               contents: [{
                 parts: [{
-                  text: `Você é um treinador experiente de CrossFit. Analise esses dados da aula de hoje e gere um comentário técnico, motivacional e positivo de 4 a 6 linhas. Destaque melhora, intensidade, recuperação e dê 1 dica prática pro próximo treino. Use tom encorajador e linguagem simples.
+                  text: `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e gere um comentário técnico, motivacional e positivo de 4 a 6 linhas. Destaque melhora, intensidade, recuperação e dê 1 dica prática pro próximo treino. Use tom encorajador e linguagem simples.
 
                   Dados de hoje:
                   - Calorias: ${Math.round(aluno.calories)} kcal
@@ -162,6 +168,12 @@ async function sendSummaryEmailsAfterClass(sessionId) {
           }
         );
 
+        clearTimeout(timeoutId);
+
+        if (!geminiResponse.ok) {
+          throw new Error(`Gemini HTTP error: ${geminiResponse.status}`);
+        }
+
         const json = await geminiResponse.json();
 
         if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
@@ -171,10 +183,11 @@ async function sendSummaryEmailsAfterClass(sessionId) {
           console.warn(`[GEMINI] Resposta inválida para ${aluno.name}`);
         }
       } catch (err) {
-        console.error(`[GEMINI ERRO] Falha para ${aluno.name}:`, err.message);
+        console.error(`[GEMINI ERRO] Falha para ${aluno.name}: ${err.message}`);
+        // Fallback mantido
       }
 
-      // HTML do e-mail (responsivo, bonito, com cores do V6)
+      // Agora monta o HTML DEPOIS de tentar o Gemini
       const html = `
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -328,7 +341,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 </html>
       `;
 
-      // Envio real
+      // Envio real (agora depois do await do Gemini)
       await transporter.sendMail({
         from: `"V6 WODPulse" <${process.env.EMAIL_USER}>`,
         to: aluno.email,
