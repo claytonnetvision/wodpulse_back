@@ -80,6 +80,49 @@ sessionsRouter.post('/', async (req, res) => {
     participantsData = [];
   }
 
+  // ── PROTEÇÃO: descartar aulas manuais muito curtas ────────────────────────────────
+  let durationSeconds = 0;
+  try {
+    const start = new Date(date_start);
+    const end = new Date(date_end);
+    if (!isNaN(start) && !isNaN(end) && end > start) {
+      durationSeconds = Math.floor((end - start) / 1000); // segundos
+    } else {
+      console.warn('[SESSION] Datas inválidas ou end < start → duração assumida como 0');
+      durationSeconds = 0;
+    }
+  } catch (err) {
+    console.error('[SESSION] Erro ao calcular duração:', err.message);
+    durationSeconds = 0;
+  }
+
+  const isManualClass = 
+    class_name && 
+    (class_name.toLowerCase().includes('manual') || 
+     class_name === 'Aula Manual');
+
+  if (isManualClass && durationSeconds < 240) {  // menos de 4 minutos (240 segundos)
+    const minutes = Math.floor(durationSeconds / 60);
+    const seconds = durationSeconds % 60;
+    const durationStr = `${minutes}min${seconds.toString().padStart(2, '0')}s`;
+
+    console.log(
+      `[DISCARD] Aula manual curta descartada - ` +
+      `duração: ${durationStr} - ` +
+      `class: "${class_name}" - ` +
+      `${new Date().toISOString()}`
+    );
+
+    return res.status(200).json({
+      success: false,
+      skipped: true,
+      reason: 'Aula com menos de 4 minutos – não registrada'
+    });
+  }
+
+  // Se chegou aqui → ou não é manual, ou tem ≥ 4 minutos → prossegue normal
+  console.log(`[SESSION] Aula válida - duração: ${Math.floor(durationSeconds / 60)}min${durationSeconds % 60}s`);
+
   const client = await pool.connect();
 
   try {
@@ -210,119 +253,55 @@ sessionsRouter.get('/:id', async (req, res) => {
   const sessionId = req.params.id;
 
   try {
-    const sessionRes = await pool.query(
-      `SELECT * FROM sessions WHERE id = $1`,
-      [sessionId]
-    );
+    const sessionRes = await pool.query(`
+      SELECT 
+        id, class_name, date_start, date_end, duration_minutes
+      FROM sessions 
+      WHERE id = $1
+    `, [sessionId]);
+
     if (sessionRes.rowCount === 0) {
       return res.status(404).json({ error: 'Sessão não encontrada' });
     }
 
-    const participantsRes = await pool.query(
-      `SELECT 
-         sp.*,
-         p.name,
-         p.gender,
-         p.age,
-         p.weight,
-         p.height_cm
-       FROM session_participants sp
-       JOIN participants p ON sp.participant_id = p.id
-       WHERE sp.session_id = $1`,
-      [sessionId]
-    );
+    const participantsRes = await pool.query(`
+      SELECT 
+        p.id, p.name,
+        sp.calories_total, sp.queima_points, sp.vo2_time_seconds,
+        sp.min_red, sp.avg_hr, sp.max_hr_reached, sp.trimp_total,
+        sp.epoc_estimated, sp.real_resting_hr
+      FROM session_participants sp
+      JOIN participants p ON p.id = sp.participant_id
+      WHERE sp.session_id = $1
+    `, [sessionId]);
 
     res.json({
       session: sessionRes.rows[0],
       participants: participantsRes.rows
     });
   } catch (err) {
-    console.error('Erro ao buscar sessão detalhada:', err.stack);
-    res.status(500).json({ error: 'Erro interno' });
+    console.error('Erro ao buscar detalhes da sessão:', err.stack);
+    res.status(500).json({ error: 'Erro ao buscar sessão' });
   }
 });
 
-// GET /api/participants/:id/history - Histórico de um aluno
-sessionsRouter.get('/participants/:id/history', async (req, res) => {
-  const participantId = req.params.id;
-  const { limit = 10 } = req.query;
+// Ranking semanal (exemplo completo baseado no seu código truncado)
+sessionsRouter.get('/ranking-semanal', async (req, res) => {
+  const { gender, metric = 'queima_points', limit = 10 } = req.query;
 
-  try {
-    const history = await pool.query(
-      `SELECT 
-         s.id AS session_id,
-         s.class_name,
-         s.date_start,
-         s.date_end,
-         sp.queima_points,
-         sp.calories_total AS calories,
-         sp.vo2_time_seconds,
-         sp.avg_hr,
-         sp.max_hr_reached,
-         sp.min_red
-       FROM session_participants sp
-       JOIN sessions s ON sp.session_id = s.id
-       WHERE sp.participant_id = $1
-       ORDER BY s.date_start DESC
-       LIMIT $2`,
-      [participantId, Number(limit)]
-    );
-
-    res.json({ history: history.rows });
-  } catch (err) {
-    console.error('Erro ao buscar histórico do participante:', err.stack);
-    res.status(500).json({ error: 'Erro ao buscar histórico' });
-  }
-});
-
-// NOVA ROTA: Apagar TODAS as aulas (sessions + participações)
-sessionsRouter.delete('/delete-all', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM session_participants');
-    await pool.query('DELETE FROM sessions');
-    console.log('[DELETE ALL] Todas as sessões e participações apagadas com sucesso');
-    res.json({ success: true, message: 'Todas as aulas apagadas' });
-  } catch (err) {
-    console.error('[DELETE ALL] Erro ao apagar tudo:', err.stack);
-    res.status(500).json({ error: 'Erro ao apagar aulas', details: err.message });
-  }
-});
-
-// DEBUG: Rota para confirmar deploy
-app.get('/api/debug-test', (req, res) => {
-  res.json({ 
-    message: 'Deploy atualizado com sucesso - rota debug OK',
-    time: new Date().toISOString()
-  });
-});
-
-// GET /api/rankings/weekly - Ranking semanal
-sessionsRouter.get('/rankings/weekly', async (req, res) => {
-  const { week_start, metric = 'queima_points', gender, limit = 20 } = req.query;
-
-  let monday;
-  if (week_start) {
-    monday = week_start;
-  } else {
-    const today = new Date();
-    const day = today.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    monday = new Date(today);
-    monday.setDate(today.getDate() + diff);
-    monday = monday.toISOString().split('T')[0];
-  }
-
+  const today = new Date();
+  const monday = new Date(today.setDate(today.getDate() - today.getDay() + 1));
+  monday.setHours(0, 0, 0, 0);
   const nextMonday = new Date(monday);
   nextMonday.setDate(nextMonday.getDate() + 7);
   const nextMondayStr = nextMonday.toISOString().split('T')[0];
+  const mondayStr = monday.toISOString().split('T')[0];
 
   let queryText = `
     SELECT 
-      p.id,
-      p.name,
-      p.gender,
+      p.id, p.name, p.gender,
       SUM(sp.queima_points) AS total_queima_points,
-      SUM(sp.calories_total) AS total_calories,
+      SUM(sp.calories_total) AS total_calorias,
       SUM(sp.vo2_time_seconds) AS total_vo2_seconds,
       MAX(sp.max_hr_reached) AS max_hr_reached,
       SUM(sp.trimp_total) AS total_trimp
@@ -332,7 +311,7 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
     WHERE s.date_start >= $1 
       AND s.date_start < $2
   `;
-  const params = [monday, nextMondayStr];
+  const params = [mondayStr, nextMondayStr];
 
   if (gender) {
     queryText += ` AND p.gender = $${params.length + 1}`;
@@ -340,7 +319,7 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
   }
 
   let orderBy;
-  if (metric === 'calories') orderBy = 'total_calories';
+  if (metric === 'calories') orderBy = 'total_calorias';
   else if (metric === 'vo2') orderBy = 'total_vo2_seconds';
   else if (metric === 'maxhr') orderBy = 'max_hr_reached';
   else if (metric === 'trimp') orderBy = 'total_trimp';
@@ -356,7 +335,7 @@ sessionsRouter.get('/rankings/weekly', async (req, res) => {
   try {
     const result = await pool.query(queryText, params);
     res.json({
-      week_start: monday,
+      week_start: mondayStr,
       rankings: result.rows
     });
   } catch (err) {
@@ -489,7 +468,7 @@ app.get('/test-gemini', async (req, res) => {
     console.log('[TEST-GEMINI] Preparando request para Gemini API...');
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
