@@ -520,7 +520,22 @@ app.get('/test-gemini', async (req, res) => {
     });
   }
 });
-
+app.delete('/api/sessions/:id', async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM session_participants WHERE session_id = $1', [id]);
+    await client.query('DELETE FROM sessions WHERE id = $1', [id]);
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Erro ao excluir' });
+  } finally {
+    client.release();
+  }
+});
 // Monta o router de sessions
 app.use('/api/sessions', sessionsRouter);
 
