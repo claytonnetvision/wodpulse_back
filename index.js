@@ -536,6 +536,115 @@ app.delete('/api/sessions/:id', async (req, res) => {
     client.release();
   }
 });
+
+// ── ROTA PARA DETALHES DE UM ALUNO (para edição) ────────────────────────────────
+app.get('/api/participants/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query('SELECT * FROM participants WHERE id = $1', [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Aluno não encontrado' });
+    }
+    res.json({ participant: result.rows[0] });
+  } catch (err) {
+    console.error('Erro ao buscar aluno:', err);
+    res.status(500).json({ error: 'Erro ao buscar aluno' });
+  }
+});
+
+// ── ROTA PARA EDITAR ALUNO (PUT) ────────────────────────────────────────────────
+// Já deve existir no routes/participants.js, mas para garantir:
+app.put('/api/participants/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    name, age, weight, height_cm, gender, email, use_tanaka,
+    max_hr, historical_max_hr, device_id, device_name
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE participants 
+       SET name = $1, age = $2, weight = $3, height_cm = $4, gender = $5, 
+           email = $6, use_tanaka = $7, max_hr = $8, historical_max_hr = $9,
+           device_id = $10, device_name = $11
+       WHERE id = $12
+       RETURNING *`,
+      [name, age, weight, height_cm, gender, email, use_tanaka, max_hr, historical_max_hr, device_id, device_name, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Aluno não encontrado' });
+    }
+
+    res.json({ participant: result.rows[0] });
+  } catch (err) {
+    console.error('Erro ao editar aluno:', err);
+    res.status(500).json({ error: 'Erro ao editar aluno' });
+  }
+});
+
+// ── ROTA PARA LISTAR TODAS SESSÕES (simples, sem filtro pesado) ─────────────────
+app.get('/api/sessions', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id, class_name, date_start, date_end, duration_minutes,
+        (SELECT COUNT(*) FROM session_participants WHERE session_id = s.id) as participant_count
+      FROM sessions s
+      ORDER BY date_start DESC
+      LIMIT 100
+    `);
+    res.json({ sessions: result.rows });
+  } catch (err) {
+    console.error('Erro ao listar sessões:', err);
+    res.status(500).json({ error: 'Erro ao listar sessões' });
+  }
+});
+
+// ── DETALHES DE UMA SESSÃO (já existe ou adicione se não tiver)
+app.get('/api/sessions/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const sessionRes = await pool.query('SELECT * FROM sessions WHERE id = $1', [id]);
+    if (sessionRes.rowCount === 0) return res.status(404).json({ error: 'Sessão não encontrada' });
+
+    const participantsRes = await pool.query(`
+      SELECT 
+        p.id, p.name, p.age, p.weight, p.height_cm, p.gender,
+        sp.*
+      FROM session_participants sp
+      JOIN participants p ON p.id = sp.participant_id
+      WHERE sp.session_id = $1
+    `, [id]);
+
+    res.json({
+      session: sessionRes.rows[0],
+      participants: participantsRes.rows
+    });
+  } catch (err) {
+    console.error('Erro detalhes sessão:', err);
+    res.status(500).json({ error: 'Erro ao buscar detalhes da sessão' });
+  }
+});
+// ── GET /api/participants/:id ── Busca um aluno específico (para edição)
+app.get('/api/participants/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'SELECT * FROM participants WHERE id = $1',
+      [id]
+    );
+    
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Aluno não encontrado' });
+    }
+    
+    res.json({ participant: result.rows[0] });
+  } catch (err) {
+    console.error('Erro ao buscar aluno específico:', err.stack);
+    res.status(500).json({ error: 'Erro interno ao buscar aluno' });
+  }
+});
 // Monta o router de sessions
 app.use('/api/sessions', sessionsRouter);
 
