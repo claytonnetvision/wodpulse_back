@@ -7,7 +7,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// GET - Lista alunos do box (versão original, sem zonas - elas ficam em session_participants)
+// GET - Lista alunos do box (sem autenticação por enquanto)
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
@@ -24,15 +24,12 @@ router.get('/', async (req, res) => {
       participants: result.rows
     });
   } catch (err) {
-    console.error('Erro ao listar participantes:', err.stack || err.message);
-    res.status(500).json({ 
-      error: 'Erro ao buscar alunos',
-      details: err.message 
-    });
+    console.error('Erro ao listar participantes:', err);
+    res.status(500).json({ error: 'Erro ao buscar alunos' });
   }
 });
 
-// POST - Cadastra novo aluno
+// POST - Cadastra novo aluno (sem autenticação)
 router.post('/', async (req, res) => {
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
@@ -47,6 +44,7 @@ router.post('/', async (req, res) => {
   try {
     const nameLower = name.trim().toLowerCase();
 
+    // Verifica duplicata (sem box_id por enquanto, já que removemos autenticação)
     const existing = await pool.query(
       'SELECT id FROM participants WHERE name_lower = $1',
       [nameLower]
@@ -74,12 +72,12 @@ router.post('/', async (req, res) => {
       participant: result.rows[0]
     });
   } catch (err) {
-    console.error('Erro ao criar participante:', err.stack || err.message);
-    res.status(500).json({ error: 'Erro ao cadastrar', details: err.message });
+    console.error('Erro ao criar participante:', err);
+    res.status(500).json({ error: 'Erro ao cadastrar' });
   }
 });
 
-// PUT - Edita aluno
+// PUT - Edita aluno (sem autenticação)
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const {
@@ -114,7 +112,7 @@ router.put('/:id', async (req, res) => {
       ]
     );
 
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Aluno não encontrado' });
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Aluno não encontrado' });
 
     res.json({
       success: true,
@@ -122,12 +120,12 @@ router.put('/:id', async (req, res) => {
       participant: result.rows[0]
     });
   } catch (err) {
-    console.error('Erro ao editar:', err.stack || err.message);
-    res.status(500).json({ error: 'Erro ao atualizar aluno', details: err.message });
+    console.error('Erro ao editar:', err);
+    res.status(500).json({ error: 'Erro ao atualizar aluno' });
   }
 });
 
-// DELETE - Exclui aluno
+// DELETE - Exclui aluno (sem autenticação)
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -136,7 +134,7 @@ router.delete('/:id', async (req, res) => {
 
     res.json({ success: true, message: 'Aluno excluído com sucesso' });
   } catch (err) {
-    console.error('Erro ao excluir:', err.stack || err.message);
+    console.error('Erro ao excluir:', err);
     res.status(500).json({ error: 'Erro ao excluir aluno' });
   }
 });
