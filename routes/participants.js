@@ -13,6 +13,7 @@ router.get('/', async (req, res) => {
     const result = await pool.query(
       `SELECT id, name, name_lower, age, weight, height_cm, gender, resting_hr, email,
               use_tanaka, max_hr, historical_max_hr, device_id, device_name,
+              min_zone2, min_zone3, min_zone4, min_zone5,  -- NOVO: zonas incluídas
               created_at, updated_at
        FROM participants
        ORDER BY name ASC`
@@ -24,7 +25,7 @@ router.get('/', async (req, res) => {
       participants: result.rows
     });
   } catch (err) {
-    console.error('Erro ao listar participantes:', err);
+    console.error('Erro ao listar participantes:', err.stack || err.message);
     res.status(500).json({ error: 'Erro ao buscar alunos' });
   }
 });
@@ -44,7 +45,7 @@ router.post('/', async (req, res) => {
   try {
     const nameLower = name.trim().toLowerCase();
 
-    // Verifica duplicata (sem box_id por enquanto, já que removemos autenticação)
+    // Verifica duplicata (sem box_id por enquanto)
     const existing = await pool.query(
       'SELECT id FROM participants WHERE name_lower = $1',
       [nameLower]
@@ -57,8 +58,9 @@ router.post('/', async (req, res) => {
       `INSERT INTO participants (
         box_id, name, name_lower, age, weight, height_cm, gender, resting_hr, email,
         use_tanaka, max_hr, historical_max_hr, device_id, device_name,
+        min_zone2, min_zone3, min_zone4, min_zone5,  -- NOVO: zonas com default 0
         created_at, updated_at
-      ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+      ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, 0, 0, 0, NOW(), NOW())
       RETURNING id, name, created_at`,
       [
         name, nameLower, age, weight, height_cm, gender, resting_hr, email,
@@ -72,7 +74,7 @@ router.post('/', async (req, res) => {
       participant: result.rows[0]
     });
   } catch (err) {
-    console.error('Erro ao criar participante:', err);
+    console.error('Erro ao criar participante:', err.stack || err.message);
     res.status(500).json({ error: 'Erro ao cadastrar' });
   }
 });
@@ -82,7 +84,9 @@ router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
-    use_tanaka, max_hr, historical_max_hr, device_id, device_name
+    use_tanaka, max_hr, historical_max_hr, device_id, device_name,
+    // NOVO: permite editar zonas manualmente (opcional, útil para correções)
+    min_zone2, min_zone3, min_zone4, min_zone5
   } = req.body;
 
   try {
@@ -103,16 +107,25 @@ router.put('/:id', async (req, res) => {
         historical_max_hr = COALESCE($11, historical_max_hr),
         device_id = COALESCE($12, device_id),
         device_name = COALESCE($13, device_name),
+        min_zone2 = COALESCE($14, min_zone2),
+        min_zone3 = COALESCE($15, min_zone3),
+        min_zone4 = COALESCE($16, min_zone4),
+        min_zone5 = COALESCE($17, min_zone5),
         updated_at = NOW()
-      WHERE id = $14
-      RETURNING id, name, email, device_id, device_name`,
+      WHERE id = $18
+      RETURNING *`,
       [
         name || null, nameLower || null, age, weight, height_cm, gender, resting_hr, email, use_tanaka, max_hr, historical_max_hr,
-        device_id, device_name, id
+        device_id, device_name,
+        min_zone2 !== undefined ? Number(min_zone2) : null,
+        min_zone3 !== undefined ? Number(min_zone3) : null,
+        min_zone4 !== undefined ? Number(min_zone4) : null,
+        min_zone5 !== undefined ? Number(min_zone5) : null,
+        id
       ]
     );
 
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Aluno não encontrado' });
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Aluno não encontrado' });
 
     res.json({
       success: true,
@@ -120,7 +133,7 @@ router.put('/:id', async (req, res) => {
       participant: result.rows[0]
     });
   } catch (err) {
-    console.error('Erro ao editar:', err);
+    console.error('Erro ao editar:', err.stack || err.message);
     res.status(500).json({ error: 'Erro ao atualizar aluno' });
   }
 });
@@ -134,7 +147,7 @@ router.delete('/:id', async (req, res) => {
 
     res.json({ success: true, message: 'Aluno excluído com sucesso' });
   } catch (err) {
-    console.error('Erro ao excluir:', err);
+    console.error('Erro ao excluir:', err.stack || err.message);
     res.status(500).json({ error: 'Erro ao excluir aluno' });
   }
 });

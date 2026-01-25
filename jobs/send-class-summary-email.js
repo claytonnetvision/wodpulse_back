@@ -28,7 +28,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
   try {
     console.log(`[EMAIL JOB] Iniciando envio para sessão ${sessionId}`);
 
-    // 1. Dados da sessão
+    // 1. Dados da sessão (inclui duration_minutes)
     const sessionRes = await pool.query(`
       SELECT 
         id, class_name, date_start, date_end, duration_minutes
@@ -46,7 +46,11 @@ async function sendSummaryEmailsAfterClass(sessionId) {
       day: '2-digit', month: '2-digit', year: 'numeric'
     });
 
-    // 2. Participantes com e-mail válido
+    // Duração da aula (já salva ou calculada como fallback)
+    const aulaDuracaoMin = session.duration_minutes || 
+      Math.round((new Date(session.date_end) - new Date(session.date_start)) / 60000);
+
+    // 2. Participantes com e-mail válido (com zonas)
     const participantsRes = await pool.query(`
       SELECT 
         p.id,
@@ -56,6 +60,10 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         sp.queima_points,
         sp.vo2_time_seconds,
         sp.min_red,
+        sp.min_zone2,
+        sp.min_zone3,
+        sp.min_zone4,
+        sp.min_zone5,
         sp.avg_hr,
         sp.max_hr_reached,
         sp.trimp_total,
@@ -78,13 +86,17 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 
     // 3. Enviar para cada aluno
     for (const aluno of participantsRes.rows) {
-      // Busca o treino anterior (último antes dessa data)
+      // Busca o treino anterior
       const prevRes = await pool.query(`
         SELECT 
           sp.calories_total AS calories,
           sp.queima_points,
           sp.vo2_time_seconds,
           sp.min_red,
+          sp.min_zone2,
+          sp.min_zone3,
+          sp.min_zone4,
+          sp.min_zone5,
           sp.avg_hr,
           sp.max_hr_reached,
           sp.trimp_total,
@@ -103,6 +115,10 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         queima_points: 0,
         vo2_time_seconds: 0,
         min_red: 0,
+        min_zone2: 0,
+        min_zone3: 0,
+        min_zone4: 0,
+        min_zone5: 0,
         avg_hr: 0,
         max_hr_reached: 0,
         trimp_total: 0,
@@ -110,30 +126,28 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         real_resting_hr: null
       };
 
-      // Cálculo de percentual de melhora na FC máxima (exemplo de intensidade)
+      // Cálculo de percentual de melhora na FC máxima
       const melhoraFcMaxPct = prev.max_hr_reached > 0 
         ? Math.round(((aluno.max_hr_reached - prev.max_hr_reached) / prev.max_hr_reached) * 100) 
         : 0;
 
-      // Frase divertida: calorias equivalentes a pão de queijo (~80 kcal cada)
+      // Frase divertida sobre calorias
       const paesDeQueijo = Math.round(aluno.calories / 80);
       const caloriasDivertido = paesDeQueijo > 0 
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
-      // === INTEGRAÇÃO GEMINI ===
+      // === INTEGRAÇÃO GEMINI (prompt atualizado com duração da aula) ===
       let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
 
       try {
         console.log(`[GEMINI] Iniciando avaliação para ${aluno.name} (session ${sessionId})`);
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // Timeout de 15 segundos
-
-        console.log(`[GEMINI DEBUG] Enviando request para aluno ${aluno.name}`);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
         const geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -141,12 +155,16 @@ async function sendSummaryEmailsAfterClass(sessionId) {
             body: JSON.stringify({
               contents: [{
                 parts: [{
-                  text: `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e do treino anterior e gere um comentário técnico, motivacional e positivo de 4 a 6 linhas completas. Destaque melhora ou piora no comparativo, intensidade da aula, recuperação e dê 1 dica prática pro próximo treino. Use tom encorajador e linguagem simples. Não corte o texto, escreva o comentário completo mesmo que precise de mais espaço.
+                  text: `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e do treino anterior e gere um comentário técnico, motivacional e positivo de 6 a 9 linhas completas. Destaque a duração da aula (${aulaDuracaoMin} minutos) em relação à intensidade geral, tempo nas zonas 2, 3, 4 e 5, melhora ou piora no comparativo, recuperação e dê 1 ou 2 dicas práticas pro próximo treino. Use tom encorajador, linguagem simples e direta. Não corte o texto, escreva o comentário completo.
 
                   Dados de hoje:
+                  - Duração da aula: ${aulaDuracaoMin} minutos
                   - Calorias: ${Math.round(aluno.calories)} kcal
                   - Queima Points: ${Math.round(aluno.queima_points)}
-                  - Zona Vermelha: ${Math.round(aluno.min_red)} min
+                  - Zona 2 (60-70%): ${Math.round(aluno.min_zone2)} min
+                  - Zona 3 (70-80%): ${Math.round(aluno.min_zone3)} min
+                  - Zona 4 (80-90%): ${Math.round(aluno.min_zone4)} min
+                  - Zona 5 (>90%): ${Math.round(aluno.min_zone5)} min
                   - Tempo VO₂ Máx: ${Math.round(aluno.vo2_time_seconds / 60)} min
                   - TRIMP Total: ${Number(aluno.trimp_total || 0).toFixed(1)}
                   - EPOC Estimado (queima pós-treino): ${Math.round(aluno.epoc_estimated || 0)} kcal
@@ -157,7 +175,10 @@ async function sendSummaryEmailsAfterClass(sessionId) {
                   Dados do treino anterior (comparativo):
                   - Calorias: ${Math.round(prev.calories)} kcal
                   - Queima Points: ${Math.round(prev.queima_points)}
-                  - Zona Vermelha: ${Math.round(prev.min_red)} min
+                  - Zona 2 (60-70%): ${Math.round(prev.min_zone2)} min
+                  - Zona 3 (70-80%): ${Math.round(prev.min_zone3)} min
+                  - Zona 4 (80-90%): ${Math.round(prev.min_zone4)} min
+                  - Zona 5 (>90%): ${Math.round(prev.min_zone5)} min
                   - Tempo VO₂ Máx: ${Math.round(prev.vo2_time_seconds / 60)} min
                   - TRIMP Total: ${Number(prev.trimp_total || 0).toFixed(1)}
                   - EPOC Estimado (queima pós-treino): ${Math.round(prev.epoc_estimated || 0)} kcal
@@ -171,7 +192,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
               }],
               generationConfig: {
                 temperature: 0.7,
-                maxOutputTokens: 8192  // máximo permitido - texto completo sem corte
+                maxOutputTokens: 8192
               }
             })
           }
@@ -179,30 +200,24 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 
         clearTimeout(timeoutId);
 
-        console.log(`[GEMINI DEBUG] Resposta HTTP recebida para ${aluno.name}: status ${geminiResponse.status}`);
-
         if (!geminiResponse.ok) {
           const errorText = await geminiResponse.text();
           throw new Error(`Gemini HTTP ${geminiResponse.status}: ${errorText}`);
         }
 
         const json = await geminiResponse.json();
-        console.log(`[GEMINI DEBUG] JSON completo da resposta para ${aluno.name}:`, JSON.stringify(json, null, 2));
 
         if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
           comentarioIA = json.candidates[0].content.parts[0].text.trim();
-          console.log(`[GEMINI OK] Comentário completo gerado para ${aluno.name}: ${comentarioIA.substring(0, 300)}...`);
+          console.log(`[GEMINI OK] Comentário gerado para ${aluno.name}`);
         } else {
           console.warn(`[GEMINI] Resposta inválida para ${aluno.name} - usando fallback`);
         }
       } catch (err) {
         console.error(`[GEMINI ERRO] Falha para ${aluno.name}: ${err.message}`);
-        if (err.name === 'AbortError') {
-          console.error('[GEMINI] Timeout: Gemini demorou mais de 20 segundos');
-        }
       }
 
-      // Agora monta o HTML DEPOIS de tentar o Gemini
+      // Monta o HTML com duração da aula e novas zonas
       const html = `
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -242,10 +257,20 @@ async function sendSummaryEmailsAfterClass(sessionId) {
       <h2>Parabéns, ${aluno.name.split(' ')[0]}!</h2>
       <p>Você completou mais uma aula com garra. Veja como foi seu desempenho hoje:</p>
 
+      <h3>Duração da Aula</h3>
+      <div class="metric">Tempo total: <span class="highlight">${aulaDuracaoMin} minutos</span></div>
+
       <h3>Desempenho de hoje</h3>
       <div class="metric">🔥 Calorias queimadas: <span class="highlight">${Math.round(aluno.calories)} kcal</span></div>
       <div class="metric">${caloriasDivertido}</div>
       <div class="metric">Queima Points: <span class="highlight">${Math.round(aluno.queima_points)}</span></div>
+
+      <!-- Tempos por zona -->
+      <div class="metric">Zona 2 (60-70%): <span class="highlight">${Math.round(aluno.min_zone2)} min</span></div>
+      <div class="metric">Zona 3 (70-80%): <span class="highlight">${Math.round(aluno.min_zone3)} min</span></div>
+      <div class="metric">Zona 4 (80-90%): <span class="highlight">${Math.round(aluno.min_zone4)} min</span></div>
+      <div class="metric">Zona 5 (>90%): <span class="highlight">${Math.round(aluno.min_zone5)} min</span></div>
+
       <div class="metric">Tempo na Zona Vermelha: <span class="highlight">${Math.round(aluno.min_red)} min</span></div>
       <div class="metric">Tempo em VO₂ Máx: <span class="highlight">${Math.round(aluno.vo2_time_seconds / 60)} min</span></div>
       <div class="metric">TRIMP Total: <span class="highlight">${Number(aluno.trimp_total || 0).toFixed(1)}</span></div>
@@ -276,6 +301,38 @@ async function sendSummaryEmailsAfterClass(sessionId) {
           <td>${Math.round(prev.queima_points)}</td>
           <td style="color: ${aluno.queima_points > prev.queima_points ? '#4CAF50' : '#f44336'}">
             ${aluno.queima_points > prev.queima_points ? '+' : ''}${Math.round(aluno.queima_points - prev.queima_points)}
+          </td>
+        </tr>
+        <tr>
+          <td>Zona 2 (60-70%)</td>
+          <td>${Math.round(aluno.min_zone2)}</td>
+          <td>${Math.round(prev.min_zone2)}</td>
+          <td style="color: ${aluno.min_zone2 > prev.min_zone2 ? '#4CAF50' : '#f44336'}">
+            ${aluno.min_zone2 > prev.min_zone2 ? '+' : ''}${Math.round(aluno.min_zone2 - prev.min_zone2)}
+          </td>
+        </tr>
+        <tr>
+          <td>Zona 3 (70-80%)</td>
+          <td>${Math.round(aluno.min_zone3)}</td>
+          <td>${Math.round(prev.min_zone3)}</td>
+          <td style="color: ${aluno.min_zone3 > prev.min_zone3 ? '#4CAF50' : '#f44336'}">
+            ${aluno.min_zone3 > prev.min_zone3 ? '+' : ''}${Math.round(aluno.min_zone3 - prev.min_zone3)}
+          </td>
+        </tr>
+        <tr>
+          <td>Zona 4 (80-90%)</td>
+          <td>${Math.round(aluno.min_zone4)}</td>
+          <td>${Math.round(prev.min_zone4)}</td>
+          <td style="color: ${aluno.min_zone4 > prev.min_zone4 ? '#4CAF50' : '#f44336'}">
+            ${aluno.min_zone4 > prev.min_zone4 ? '+' : ''}${Math.round(aluno.min_zone4 - prev.min_zone4)}
+          </td>
+        </tr>
+        <tr>
+          <td>Zona 5 (>90%)</td>
+          <td>${Math.round(aluno.min_zone5)}</td>
+          <td>${Math.round(prev.min_zone5)}</td>
+          <td style="color: ${aluno.min_zone5 > prev.min_zone5 ? '#4CAF50' : '#f44336'}">
+            ${aluno.min_zone5 > prev.min_zone5 ? '+' : ''}${Math.round(aluno.min_zone5 - prev.min_zone5)}
           </td>
         </tr>
         <tr>
@@ -337,13 +394,13 @@ async function sendSummaryEmailsAfterClass(sessionId) {
       </div>
 
       <div class="metrics-info">
-        <h4>Entenda suas métricas</h4>
+        <h4>Entenda suas zonas de treinamento</h4>
         <ul>
-          <li><strong>EPOC (Dívida de Oxigênio Pós-Treino):</strong> É o consumo extra de oxigênio que seu corpo usa após o treino para se recuperar, queimando calorias mesmo em repouso. Benefício: Aumenta o metabolismo basal e melhora a recuperação muscular — quanto maior, melhor sua adaptação ao treino!</li>
-          <li><strong>VO₂ Máx:</strong> Mede o tempo em que você atinge o pico de consumo de oxigênio (92%+ da FC máxima). Benefício: Treina o sistema aeróbico de elite, aumentando resistência e performance em WODs longos, como sprints ou AMRAPs.</li>
-          <li><strong>Zona Vermelha:</strong> FC acima de 90% da máxima — zona anaeróbica intensa, onde você usa glicogênio rápido para explosões de energia. Benefício: Desenvolve fibras musculares rápidas, melhora velocidade e força máxima, ideal para CrossFit de alta intensidade (mas use com moderação para evitar fadiga).</li>
-          <li><strong>Frequência Cardíaca (FC):</strong> Inclui FC média, máxima e repouso — monitora a intensidade e recuperação do coração. Benefício: Ajuda a personalizar treinos, otimizar zonas de queima de gordura e prevenir overtraining; FC repouso baixa indica bom condicionamento cardiovascular.</li>
-          <li><strong>Queima Points:</strong> Pontos personalizados baseados em TRIMP e calorias, medindo a "carga de treino" total. Benefício: Motiva progresso semanal, rastreando eficiência energética e adaptação ao CrossFit — mais pontos = treino mais produtivo!</li>
+          <li><strong>Zona 2 (60-70% FCmáx):</strong> Aeróbica leve — ótima para construir base cardiovascular, queima gordura e recuperação ativa.</li>
+          <li><strong>Zona 3 (70-80% FCmáx):</strong> Aeróbica moderada — melhora resistência e eficiência cardíaca, ideal para treinos longos e WODs de ritmo constante.</li>
+          <li><strong>Zona 4 (80-90% FCmáx):</strong> Limiar anaeróbico — aumenta capacidade de sustentar alta intensidade, essencial para melhorar performance em AMRAPs e sprints.</li>
+          <li><strong>Zona 5 (>90% FCmáx):</strong> Máxima/VO2 — treina potência anaeróbica e VO2 máximo, mas use com moderação para evitar fadiga excessiva.</li>
+          <li><strong>TRIMP / EPOC:</strong> Medem carga total do treino e recuperação pós-treino — quanto maior, maior o estímulo e benefício a longo prazo.</li>
         </ul>
       </div>
     </div>
@@ -356,7 +413,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 </html>
       `;
 
-      // Envio real (agora depois do await do Gemini)
+      // Envio real
       await transporter.sendMail({
         from: `"V6 WODPulse" <${process.env.EMAIL_USER}>`,
         to: aluno.email,
