@@ -7,13 +7,12 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// GET - Lista alunos do box (sem autenticação por enquanto)
+// GET - Lista alunos do box (versão original, sem zonas - elas ficam em session_participants)
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, name, name_lower, age, weight, height_cm, gender, resting_hr, email,
               use_tanaka, max_hr, historical_max_hr, device_id, device_name,
-              min_zone2, min_zone3, min_zone4, min_zone5,  -- NOVO: zonas incluídas
               created_at, updated_at
        FROM participants
        ORDER BY name ASC`
@@ -26,11 +25,14 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('Erro ao listar participantes:', err.stack || err.message);
-    res.status(500).json({ error: 'Erro ao buscar alunos' });
+    res.status(500).json({ 
+      error: 'Erro ao buscar alunos',
+      details: err.message 
+    });
   }
 });
 
-// POST - Cadastra novo aluno (sem autenticação)
+// POST - Cadastra novo aluno
 router.post('/', async (req, res) => {
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
@@ -45,7 +47,6 @@ router.post('/', async (req, res) => {
   try {
     const nameLower = name.trim().toLowerCase();
 
-    // Verifica duplicata (sem box_id por enquanto)
     const existing = await pool.query(
       'SELECT id FROM participants WHERE name_lower = $1',
       [nameLower]
@@ -58,9 +59,8 @@ router.post('/', async (req, res) => {
       `INSERT INTO participants (
         box_id, name, name_lower, age, weight, height_cm, gender, resting_hr, email,
         use_tanaka, max_hr, historical_max_hr, device_id, device_name,
-        min_zone2, min_zone3, min_zone4, min_zone5,  -- NOVO: zonas com default 0
         created_at, updated_at
-      ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, 0, 0, 0, NOW(), NOW())
+      ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
       RETURNING id, name, created_at`,
       [
         name, nameLower, age, weight, height_cm, gender, resting_hr, email,
@@ -75,18 +75,16 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     console.error('Erro ao criar participante:', err.stack || err.message);
-    res.status(500).json({ error: 'Erro ao cadastrar' });
+    res.status(500).json({ error: 'Erro ao cadastrar', details: err.message });
   }
 });
 
-// PUT - Edita aluno (sem autenticação)
+// PUT - Edita aluno
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
-    use_tanaka, max_hr, historical_max_hr, device_id, device_name,
-    // NOVO: permite editar zonas manualmente (opcional, útil para correções)
-    min_zone2, min_zone3, min_zone4, min_zone5
+    use_tanaka, max_hr, historical_max_hr, device_id, device_name
   } = req.body;
 
   try {
@@ -107,21 +105,12 @@ router.put('/:id', async (req, res) => {
         historical_max_hr = COALESCE($11, historical_max_hr),
         device_id = COALESCE($12, device_id),
         device_name = COALESCE($13, device_name),
-        min_zone2 = COALESCE($14, min_zone2),
-        min_zone3 = COALESCE($15, min_zone3),
-        min_zone4 = COALESCE($16, min_zone4),
-        min_zone5 = COALESCE($17, min_zone5),
         updated_at = NOW()
-      WHERE id = $18
-      RETURNING *`,
+      WHERE id = $14
+      RETURNING id, name, email, device_id, device_name`,
       [
         name || null, nameLower || null, age, weight, height_cm, gender, resting_hr, email, use_tanaka, max_hr, historical_max_hr,
-        device_id, device_name,
-        min_zone2 !== undefined ? Number(min_zone2) : null,
-        min_zone3 !== undefined ? Number(min_zone3) : null,
-        min_zone4 !== undefined ? Number(min_zone4) : null,
-        min_zone5 !== undefined ? Number(min_zone5) : null,
-        id
+        device_id, device_name, id
       ]
     );
 
@@ -134,11 +123,11 @@ router.put('/:id', async (req, res) => {
     });
   } catch (err) {
     console.error('Erro ao editar:', err.stack || err.message);
-    res.status(500).json({ error: 'Erro ao atualizar aluno' });
+    res.status(500).json({ error: 'Erro ao atualizar aluno', details: err.message });
   }
 });
 
-// DELETE - Exclui aluno (sem autenticação)
+// DELETE - Exclui aluno
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
