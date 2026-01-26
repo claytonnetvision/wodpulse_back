@@ -84,11 +84,6 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 
     console.log(`[EMAIL JOB] Enviando para ${participantsRes.rowCount} alunos`);
 
-    // ADIÇÃO PARA DEBUG: Verifica se a chave Gemini existe antes de tentar usar
-    if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY.trim() === '') {
-      console.error('[GEMINI DEBUG] GEMINI_API_KEY NÃO ESTÁ DEFINIDA ou está vazia no ambiente');
-    }
-
     // 3. Enviar para cada aluno
     for (const aluno of participantsRes.rows) {
       // Busca o treino anterior
@@ -149,15 +144,12 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         console.log(`[GEMINI] Iniciando avaliação para ${aluno.name} (session ${sessionId})`);
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // ADIÇÃO: Aumentado para 30 segundos
-
-        // ADIÇÃO PARA DEBUG
-        console.log(`[GEMINI DEBUG] Chave Gemini presente? ${!!process.env.GEMINI_API_KEY}`);
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // ADIÇÃO PARA CORREÇÃO: aumentado para 30 segundos
 
         const geminiResponse = await fetch(
-`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`,
-  {
-                method: 'POST',
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`, // ADIÇÃO PARA CORREÇÃO: modelo correto (latest)
+          {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
             body: JSON.stringify({
@@ -208,8 +200,8 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 
         clearTimeout(timeoutId);
 
-        // ADIÇÃO PARA DEBUG: Mostra o status HTTP
-        console.log(`[GEMINI DEBUG] Status HTTP: ${geminiResponse.status}`);
+        // ADIÇÃO PARA DEBUG
+        console.log(`[GEMINI DEBUG] Status HTTP recebido: ${geminiResponse.status}`);
 
         if (!geminiResponse.ok) {
           const errorText = await geminiResponse.text();
@@ -223,7 +215,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
           comentarioIA = json.candidates[0].content.parts[0].text.trim();
           console.log(`[GEMINI OK] Comentário gerado para ${aluno.name} (tamanho: ${comentarioIA.length} chars)`);
         } else {
-          console.warn(`[GEMINI] Resposta sem candidates/text válido para ${aluno.name} - usando fallback`);
+          console.warn(`[GEMINI] Resposta inválida para ${aluno.name} - usando fallback`);
         }
       } catch (err) {
         console.error(`[GEMINI ERRO] Falha para ${aluno.name}: ${err.message}`);
