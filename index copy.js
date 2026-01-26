@@ -151,11 +151,8 @@ sessionsRouter.post('/', async (req, res) => {
           queima_points, calories, vo2_time_seconds, epoc_estimated,
           real_resting_hr, avg_hr, max_hr_reached, created_at,
           min_gray, min_green, min_blue, min_yellow, min_orange, min_red,
-          min_zone2, min_zone3, min_zone4, min_zone5,  // ADIÇÃO PARA SALVAR ZONAS 2-5
           trimp_total, calories_total
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15,
-                  $18, $19, $20, $21,  // ADIÇÃO PARA SALVAR ZONAS 2-5 (índices ajustados)
-                  $22, $23)`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, $17)`,
         [
           sessionId,
           p.participantId,
@@ -172,10 +169,6 @@ sessionsRouter.post('/', async (req, res) => {
           Number(p.min_yellow) || 0,
           Number(p.min_orange) || 0,
           Number(p.min_red) || 0,
-          Number(p.min_zone2) || 0,     // ADIÇÃO PARA SALVAR ZONAS 2-5
-          Number(p.min_zone3) || 0,
-          Number(p.min_zone4) || 0,
-          Number(p.min_zone5) || 0,
           Number(p.trimp_total) || 0,
           Number(p.calories_total) || 0
         ]
