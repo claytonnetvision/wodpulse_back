@@ -644,6 +644,30 @@ app.get('/api/participants/:id', async (req, res) => {
     console.error('Erro ao buscar aluno específico:', err.stack);
     res.status(500).json({ error: 'Erro interno ao buscar aluno' });
   }
+
+
+  async function listGeminiModels() {
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`
+    );
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('Erro ao listar modelos:', response.status, err);
+      return;
+    }
+
+    const data = await response.json();
+    console.log('Modelos disponíveis:');
+    console.log(JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error('Falha na chamada ListModels:', err.message);
+  }
+}
+
+// Chame isso em algum lugar (ex: rota teste ou no início do servidor)
+listGeminiModels();
 });
 // Monta o router de sessions
 app.use('/api/sessions', sessionsRouter);
