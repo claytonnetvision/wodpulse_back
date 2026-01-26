@@ -140,14 +140,17 @@ async function sendSummaryEmailsAfterClass(sessionId) {
       // === INTEGRAÇÃO GEMINI (prompt atualizado com duração da aula) ===
       let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
 
+      // ADIÇÃO FORÇADA: Log antes do try para saber se chega aqui
+      console.log(`[GEMINI DEBUG FORÇADO] Bloco Gemini alcançado para ${aluno.name} (session ${sessionId}) - chave presente? ${!!process.env.GEMINI_API_KEY}`);
+
       try {
         console.log(`[GEMINI] Iniciando avaliação para ${aluno.name} (session ${sessionId})`);
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // ADIÇÃO PARA CORREÇÃO: aumentado para 30 segundos
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
 
         const geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`, // ADIÇÃO PARA CORREÇÃO: modelo correto (latest)
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -200,7 +203,6 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 
         clearTimeout(timeoutId);
 
-        // ADIÇÃO PARA DEBUG
         console.log(`[GEMINI DEBUG] Status HTTP recebido: ${geminiResponse.status}`);
 
         if (!geminiResponse.ok) {
