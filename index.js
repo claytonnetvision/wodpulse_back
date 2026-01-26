@@ -468,7 +468,7 @@ app.get('/test-gemini', async (req, res) => {
     console.log('[TEST-GEMINI] Preparando request para Gemini API...');
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -520,6 +520,48 @@ app.get('/test-gemini', async (req, res) => {
     });
   }
 });
+
+// NOVA ROTA PARA LISTAR MODELOS DISPONÍVEIS DO GEMINI
+app.get('/test-gemini-models', async (req, res) => {
+  console.log('[TEST-GEMINI-MODELS] Rota acessada - listando modelos disponíveis');
+
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY não encontrada no environment' });
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[TEST-GEMINI-MODELS] Erro ao listar modelos:', response.status, errorText);
+      return res.status(response.status).json({ 
+        error: 'Falha ao listar modelos',
+        status: response.status,
+        details: errorText 
+      });
+    }
+
+    const data = await response.json();
+    console.log('[TEST-GEMINI-MODELS] Modelos encontrados:', JSON.stringify(data, null, 2));
+
+    res.json({
+      success: true,
+      models: data.models || [],
+      fullResponse: data
+    });
+  } catch (err) {
+    console.error('[TEST-GEMINI-MODELS] Erro na chamada ListModels:', err.message);
+    res.status(500).json({ 
+      success: false,
+      error: err.message,
+      stack: err.stack ? err.stack.substring(0, 500) : 'Sem stack'
+    });
+  }
+});
+
 app.delete('/api/sessions/:id', async (req, res) => {
   const { id } = req.params;
   const client = await pool.connect();
@@ -553,7 +595,6 @@ app.get('/api/participants/:id', async (req, res) => {
 });
 
 // ── ROTA PARA EDITAR ALUNO (PUT) ────────────────────────────────────────────────
-// Já deve existir no routes/participants.js, mas para garantir:
 app.put('/api/participants/:id', async (req, res) => {
   const { id } = req.params;
   const {
@@ -601,7 +642,7 @@ app.get('/api/sessions', async (req, res) => {
   }
 });
 
-// ── DETALHES DE UMA SESSÃO (já existe ou adicione se não tiver)
+// ── DETALHES DE UMA SESSÃO ────────────────────────────────
 app.get('/api/sessions/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -626,49 +667,7 @@ app.get('/api/sessions/:id', async (req, res) => {
     res.status(500).json({ error: 'Erro ao buscar detalhes da sessão' });
   }
 });
-// ── GET /api/participants/:id ── Busca um aluno específico (para edição)
-app.get('/api/participants/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query(
-      'SELECT * FROM participants WHERE id = $1',
-      [id]
-    );
-    
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Aluno não encontrado' });
-    }
-    
-    res.json({ participant: result.rows[0] });
-  } catch (err) {
-    console.error('Erro ao buscar aluno específico:', err.stack);
-    res.status(500).json({ error: 'Erro interno ao buscar aluno' });
-  }
 
-
-  async function listGeminiModels() {
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`
-    );
-
-    if (!response.ok) {
-      const err = await response.text();
-      console.error('Erro ao listar modelos:', response.status, err);
-      return;
-    }
-
-    const data = await response.json();
-    console.log('Modelos disponíveis:');
-    console.log(JSON.stringify(data, null, 2));
-  } catch (err) {
-    console.error('Falha na chamada ListModels:', err.message);
-  }
-}
-
-// Chame isso em algum lugar (ex: rota teste ou no início do servidor)
-listGeminiModels();
-});
 // Monta o router de sessions
 app.use('/api/sessions', sessionsRouter);
 
