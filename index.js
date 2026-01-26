@@ -364,7 +364,11 @@ app.get('/api/participants/ranking-acumulado', async (req, res) => {
       SUM(sp.min_red) AS total_tempo_vermelho_min,
       SUM(sp.queima_points) AS total_queima_points,
       AVG(sp.trimp_total) AS trimp_medio,
-      AVG(sp.epoc_estimated) AS epoc_medio
+      AVG(sp.epoc_estimated) AS epoc_medio,
+      SUM(sp.min_zone2) AS total_min_zone2,
+      SUM(sp.min_zone3) AS total_min_zone3,
+      SUM(sp.min_zone4) AS total_min_zone4,
+      SUM(sp.min_zone5) AS total_min_zone5
     FROM participants p
     LEFT JOIN session_participants sp ON sp.participant_id = p.id
     LEFT JOIN sessions s ON s.id = sp.session_id
@@ -420,7 +424,11 @@ app.get('/api/sessions/historico', async (req, res) => {
       sp.queima_points,
       sp.trimp_total,
       sp.epoc_estimated,
-      sp.real_resting_hr
+      sp.real_resting_hr,
+      sp.min_zone2,
+      sp.min_zone3,
+      sp.min_zone4,
+      sp.min_zone5
     FROM sessions s
     JOIN session_participants sp ON sp.session_id = s.id
     JOIN participants p ON p.id = sp.participant_id
