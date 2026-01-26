@@ -153,9 +153,7 @@ sessionsRouter.post('/', async (req, res) => {
           min_gray, min_green, min_blue, min_yellow, min_orange, min_red,
           min_zone2, min_zone3, min_zone4, min_zone5,
           trimp_total, calories_total
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15,
-                  $18, $19, $20, $21,
-                  $22, $23)`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
         [
           sessionId,
           p.participantId,
