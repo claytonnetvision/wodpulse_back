@@ -933,6 +933,89 @@ Data da aula de hoje: ${classDate}`
     });
   }
 });
+
+
+// ────────────────────────────────────────────────────────────────
+// ROTA DE TESTE PARA DEEPSEEK API (valida a chave e o endpoint)
+// Acesse: /test-deepseek
+// ────────────────────────────────────────────────────────────────
+app.get('/test-deepseek', async (req, res) => {
+  console.log('[TEST-DEEPSEEK] Rota acessada - validando API key');
+
+  try {
+    // Verifica se a chave existe no environment (Render ou .env)
+    if (!process.env.DEEPSEEK_API_KEY) {
+      console.error('[TEST-DEEPSEEK] DEEPSEEK_API_KEY não encontrada no environment');
+      return res.status(500).json({
+        success: false,
+        error: 'DEEPSEEK_API_KEY não configurada no Render / .env'
+      });
+    }
+
+    console.log('[TEST-DEEPSEEK] Chave encontrada, enviando teste simples...');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 segundos de timeout
+
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          {
+            role: 'user',
+            content: 'Teste simples: responda apenas com "DeepSeek API está funcionando perfeitamente!" se tudo estiver ok.'
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 50,
+        stream: false
+      })
+    });
+
+    clearTimeout(timeoutId);
+
+    console.log('[TEST-DEEPSEEK] Status HTTP recebido:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[TEST-DEEPSEEK] Erro na API:', response.status, errorText);
+      return res.status(response.status).json({
+        success: false,
+        error: `DeepSeek retornou erro HTTP ${response.status}: ${errorText}`
+      });
+    }
+
+    const json = await response.json();
+    console.log('[TEST-DEEPSEEK] Resposta completa:', JSON.stringify(json, null, 2));
+
+    const textoResposta = json.choices?.[0]?.message?.content?.trim() || 'Sem texto na resposta';
+
+    res.json({
+      success: true,
+      resposta: textoResposta,
+      model: 'deepseek-chat',
+      status: response.status,
+      jsonCompleto: json
+    });
+
+  } catch (err) {
+    console.error('[TEST-DEEPSEEK] Erro completo:', err.message);
+    if (err.name === 'AbortError') {
+      console.error('[TEST-DEEPSEEK] Timeout: DeepSeek demorou mais de 20 segundos');
+    }
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      stack: err.stack ? err.stack.substring(0, 300) : 'Sem stack'
+    });
+  }
+});
 // Inicia o servidor
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);

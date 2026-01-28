@@ -137,145 +137,94 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
-      // ==============================================
-      // INTEGRAÇÃO IA: Gemini → DeepSeek → Fallback
-      // ==============================================
-      let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback padrão
-      let iaUsada = 'fallback';
+      // === INTEGRAÇÃO GEMINI (prompt atualizado com duração da aula) ===
+      let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
 
-      const promptText = `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e do treino anterior e gere um comentário técnico, motivacional e positivo de 6 a 9 linhas completas. Destaque a duração da aula (${aulaDuracaoMin} minutos) em relação à intensidade geral, tempo nas zonas 2, 3, 4 e 5, melhora ou piora no comparativo, recuperação e dê 1 ou 2 dicas práticas pro próximo treino. Use tom encorajador, linguagem simples e direta. Não corte o texto, escreva o comentário completo.
+      // ADIÇÃO FORÇADA: Log antes do try para saber se chega aqui
+      console.log(`[GEMINI DEBUG FORÇADO] Bloco Gemini alcançado para ${aluno.name} (session ${sessionId}) - chave presente? ${!!process.env.GEMINI_API_KEY}`);
 
-Dados de hoje:
-- Duração da aula: ${aulaDuracaoMin} minutos
-- Calorias: ${Math.round(aluno.calories)} kcal
-- Queima Points: ${Math.round(aluno.queima_points)}
-- Zona 2 (60-70%): ${Math.round(aluno.min_zone2)} min
-- Zona 3 (70-80%): ${Math.round(aluno.min_zone3)} min
-- Zona 4 (80-90%): ${Math.round(aluno.min_zone4)} min
-- Zona 5 (>90%): ${Math.round(aluno.min_zone5)} min
-- Tempo VO₂ Máx: ${Math.round(aluno.vo2_time_seconds / 60)} min
-- TRIMP Total: ${Number(aluno.trimp_total || 0).toFixed(1)}
-- EPOC Estimado (queima pós-treino): ${Math.round(aluno.epoc_estimated || 0)} kcal
-- FC Média: ${Math.round(aluno.avg_hr || 0)} bpm
-- FC Máxima atingida: ${Math.round(aluno.max_hr_reached || 0)} bpm
-- FC Repouso real: ${Math.round(aluno.real_resting_hr || 0)} bpm
+      try {
+        console.log(`[GEMINI] Iniciando avaliação para ${aluno.name} (session ${sessionId})`);
 
-Dados do treino anterior (comparativo):
-- Calorias: ${Math.round(prev.calories)} kcal
-- Queima Points: ${Math.round(prev.queima_points)}
-- Zona 2 (60-70%): ${Math.round(prev.min_zone2)} min
-- Zona 3 (70-80%): ${Math.round(prev.min_zone3)} min
-- Zona 4 (80-90%): ${Math.round(prev.min_zone4)} min
-- Zona 5 (>90%): ${Math.round(prev.min_zone5)} min
-- Tempo VO₂ Máx: ${Math.round(prev.vo2_time_seconds / 60)} min
-- TRIMP Total: ${Number(prev.trimp_total || 0).toFixed(1)}
-- EPOC Estimado (queima pós-treino): ${Math.round(prev.epoc_estimated || 0)} kcal
-- FC Média: ${Math.round(prev.avg_hr || 0)} bpm
-- FC Máxima atingida: ${Math.round(prev.max_hr_reached || 0)} bpm
-- FC Repouso real: ${Math.round(prev.real_resting_hr || 0)} bpm
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-Nome do aluno: ${aluno.name.split(' ')[0]}
-Data da aula de hoje: ${classDate}`;
-
-      // ── 1. TENTATIVAS COM GEMINI (3x com delay de 60s) ───────────────────────
-      const maxRetriesGemini = 3;
-      let geminiSuccess = false;
-
-      for (let attempt = 1; attempt <= maxRetriesGemini && !geminiSuccess; attempt++) {
-        try {
-          console.log(`[GEMINI] Tentativa ${attempt}/${maxRetriesGemini} para ${aluno.name}`);
-
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-          const geminiResponse = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              signal: controller.signal,
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: promptText }] }],
-                generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
-              })
-            }
-          );
-
-          clearTimeout(timeoutId);
-
-          if (!geminiResponse.ok) {
-            const errorText = await geminiResponse.text();
-            console.error(`[GEMINI ERRO] Tentativa ${attempt} - HTTP ${geminiResponse.status}: ${errorText}`);
-
-            if ([503, 429, 500, 502, 504].includes(geminiResponse.status)) {
-              if (attempt < maxRetriesGemini) {
-                console.log(`[GEMINI RETRY] Aguardando 60 segundos para tentativa ${attempt + 1}...`);
-                await new Promise(r => setTimeout(r, 60000));
-              }
-              continue;
-            }
-            throw new Error(`Gemini erro não recuperável`);
-          }
-
-          const json = await geminiResponse.json();
-          if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
-            comentarioIA = json.candidates[0].content.parts[0].text.trim();
-            geminiSuccess = true;
-            iaUsada = 'gemini';
-            console.log(`[GEMINI SUCESSO] Comentário gerado na tentativa ${attempt} (${comentarioIA.length} chars)`);
-          } else {
-            console.warn(`[GEMINI] Resposta inválida na tentativa ${attempt}`);
-          }
-        } catch (err) {
-          console.error(`[GEMINI FALHA] Tentativa ${attempt}: ${err.message}`);
-          if (attempt < maxRetriesGemini) {
-            await new Promise(r => setTimeout(r, 60000));
-          }
-        }
-      }
-
-      // ── 2. SE GEMINI FALHOU → TENTA DEEPSEEK (1 tentativa) ─────────────────────
-      if (!geminiSuccess && process.env.DEEPSEEK_API_KEY) {
-        try {
-          console.log(`[DEEPSEEK] Gemini falhou → tentando DeepSeek para ${aluno.name}`);
-
-          const deepseekResponse = await fetch('https://api.deepseek.com/chat/completions', {
+        const geminiResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-            },
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
             body: JSON.stringify({
-              model: 'deepseek-chat',
-              messages: [
-                { role: 'system', content: 'Você é um treinador experiente de CrossFit, corrida e esportes. Responda de forma técnica, motivacional e positiva.' },
-                { role: 'user', content: promptText }
-              ],
-              temperature: 0.7,
-              max_tokens: 1200,
-              stream: false
+              contents: [{
+                parts: [{
+                  text: `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e do treino anterior e gere um comentário técnico, motivacional e positivo de 6 a 9 linhas completas. Destaque a duração da aula (${aulaDuracaoMin} minutos) em relação à intensidade geral, tempo nas zonas 2, 3, 4 e 5, melhora ou piora no comparativo, recuperação e dê 1 ou 2 dicas práticas pro próximo treino. Use tom encorajador, linguagem simples e direta. Não corte o texto, escreva o comentário completo.
+
+                  Dados de hoje:
+                  - Duração da aula: ${aulaDuracaoMin} minutos
+                  - Calorias: ${Math.round(aluno.calories)} kcal
+                  - Queima Points: ${Math.round(aluno.queima_points)}
+                  - Zona 2 (60-70%): ${Math.round(aluno.min_zone2)} min
+                  - Zona 3 (70-80%): ${Math.round(aluno.min_zone3)} min
+                  - Zona 4 (80-90%): ${Math.round(aluno.min_zone4)} min
+                  - Zona 5 (>90%): ${Math.round(aluno.min_zone5)} min
+                  - Tempo VO₂ Máx: ${Math.round(aluno.vo2_time_seconds / 60)} min
+                  - TRIMP Total: ${Number(aluno.trimp_total || 0).toFixed(1)}
+                  - EPOC Estimado (queima pós-treino): ${Math.round(aluno.epoc_estimated || 0)} kcal
+                  - FC Média: ${Math.round(aluno.avg_hr || 0)} bpm
+                  - FC Máxima atingida: ${Math.round(aluno.max_hr_reached || 0)} bpm
+                  - FC Repouso real: ${Math.round(aluno.real_resting_hr || 0)} bpm
+
+                  Dados do treino anterior (comparativo):
+                  - Calorias: ${Math.round(prev.calories)} kcal
+                  - Queima Points: ${Math.round(prev.queima_points)}
+                  - Zona 2 (60-70%): ${Math.round(prev.min_zone2)} min
+                  - Zona 3 (70-80%): ${Math.round(prev.min_zone3)} min
+                  - Zona 4 (80-90%): ${Math.round(prev.min_zone4)} min
+                  - Zona 5 (>90%): ${Math.round(prev.min_zone5)} min
+                  - Tempo VO₂ Máx: ${Math.round(prev.vo2_time_seconds / 60)} min
+                  - TRIMP Total: ${Number(prev.trimp_total || 0).toFixed(1)}
+                  - EPOC Estimado (queima pós-treino): ${Math.round(prev.epoc_estimated || 0)} kcal
+                  - FC Média: ${Math.round(prev.avg_hr || 0)} bpm
+                  - FC Máxima atingida: ${Math.round(prev.max_hr_reached || 0)} bpm
+                  - FC Repouso real: ${Math.round(prev.real_resting_hr || 0)} bpm
+
+                  Nome do aluno: ${aluno.name.split(' ')[0]}
+                  Data da aula de hoje: ${classDate}`
+                }]
+              }],
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 8192
+              }
             })
-          });
-
-          if (!deepseekResponse.ok) {
-            const errText = await deepseekResponse.text();
-            console.error(`[DEEPSEEK ERRO] HTTP ${deepseekResponse.status}: ${errText}`);
-            throw new Error('DeepSeek falhou');
           }
+        );
 
-          const json = await deepseekResponse.json();
-          if (json.choices?.[0]?.message?.content) {
-            comentarioIA = json.choices[0].message.content.trim();
-            iaUsada = 'deepseek';
-            console.log(`[DEEPSEEK SUCESSO] Comentário gerado (${comentarioIA.length} chars)`);
-          }
-        } catch (err) {
-          console.error(`[DEEPSEEK FALHA] ${err.message}`);
+        clearTimeout(timeoutId);
+
+        console.log(`[GEMINI DEBUG] Status HTTP recebido: ${geminiResponse.status}`);
+
+        if (!geminiResponse.ok) {
+          const errorText = await geminiResponse.text();
+          console.error(`[GEMINI ERRO] HTTP ${geminiResponse.status}: ${errorText}`);
+          throw new Error(`Gemini retornou erro HTTP ${geminiResponse.status}: ${errorText}`);
+        }
+
+        const json = await geminiResponse.json();
+
+        if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
+          comentarioIA = json.candidates[0].content.parts[0].text.trim();
+          console.log(`[GEMINI OK] Comentário gerado para ${aluno.name} (tamanho: ${comentarioIA.length} chars)`);
+        } else {
+          console.warn(`[GEMINI] Resposta inválida para ${aluno.name} - usando fallback`);
+        }
+      } catch (err) {
+        console.error(`[GEMINI ERRO] Falha para ${aluno.name}: ${err.message}`);
+        if (err.name === 'AbortError') {
+          console.error('[GEMINI ERRO] Timeout após 30 segundos');
         }
       }
-
-      // Log final da IA usada
-      console.log(`[IA FINAL] Usando ${iaUsada} para ${aluno.name}`);
 
       // Monta o HTML com duração da aula e novas zonas
       const html = `
@@ -449,7 +398,7 @@ Data da aula de hoje: ${classDate}`;
       </table>
 
       <div class="comment">
-        <strong>Comentário do treinador (com ajuda da IA - ${iaUsada}):</strong><br><br>
+        <strong>Comentário do treinador (com ajuda da IA):</strong><br><br>
         ${comentarioIA}
       </div>
 
@@ -481,7 +430,7 @@ Data da aula de hoje: ${classDate}`;
         html: html,
       });
 
-      console.log(`[EMAIL OK] Enviado para ${aluno.name} (${aluno.email}) - IA: ${iaUsada}`);
+      console.log(`[EMAIL OK] Enviado para ${aluno.name} (${aluno.email})`);
     }
 
     console.log(`[EMAIL JOB] Finalizado - ${participantsRes.rowCount} e-mails enviados para sessão ${sessionId}`);
