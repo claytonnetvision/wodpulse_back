@@ -1079,7 +1079,7 @@ app.get('/test-openrouter', async (req, res) => {
     res.json({
       success: true,
       resposta: texto,
-      model: 'hermes-3-llama-3.1-405b:free',
+      model: 'meta-llama/llama-3.1-8b-instruct:free',
       status: response.status,
       jsonCompleto: json
     });
