@@ -1016,6 +1016,82 @@ app.get('/test-deepseek', async (req, res) => {
     });
   }
 });
+
+// ────────────────────────────────────────────────────────────────
+// ROTA DE TESTE PARA OPENROUTER API (valida chave e endpoint)
+// Acesse: https://wodpulse-back.onrender.com/test-openrouter
+// ────────────────────────────────────────────────────────────────
+app.get('/test-openrouter', async (req, res) => {
+  console.log('[TEST-OPENROUTER] Rota acessada - validando API key');
+
+  try {
+    if (!process.env.OPENROUTER_API_KEY) {
+      console.error('[TEST-OPENROUTER] OPENROUTER_API_KEY não encontrada');
+      return res.status(500).json({
+        success: false,
+        error: 'OPENROUTER_API_KEY não configurada no Render / .env'
+      });
+    }
+
+    console.log('[TEST-OPENROUTER] Chave encontrada, enviando teste simples...');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'HTTP-Referer': 'https://wodpulse.com', // opcional, mas ajuda no tracking
+        'X-Title': 'WODPulse Test'              // opcional
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'nousresearch/hermes-3-llama-3.1-405b:free', // modelo free grande e bom
+        messages: [
+          {
+            role: 'user',
+            content: 'Teste simples OpenRouter: responda apenas com "OpenRouter está funcionando 100%!" se tudo ok.'
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 50
+      })
+    });
+
+    clearTimeout(timeoutId);
+
+    console.log('[TEST-OPENROUTER] Status HTTP:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[TEST-OPENROUTER] Erro:', response.status, errorText);
+      return res.status(response.status).json({
+        success: false,
+        error: `OpenRouter retornou HTTP ${response.status}: ${errorText}`
+      });
+    }
+
+    const json = await response.json();
+    const texto = json.choices?.[0]?.message?.content?.trim() || 'Sem resposta';
+
+    res.json({
+      success: true,
+      resposta: texto,
+      model: 'hermes-3-llama-3.1-405b:free',
+      status: response.status,
+      jsonCompleto: json
+    });
+
+  } catch (err) {
+    console.error('[TEST-OPENROUTER] Erro completo:', err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
 // Inicia o servidor
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);
