@@ -137,10 +137,8 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
-      // ==============================================
-      // INTEGRAÇÃO IA: Gemini → DeepSeek → Fallback
-      // ==============================================
-      let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback padrão
+      // === INTEGRAÇÃO GEMINI COM RETRY AGRESSIVO (apenas Gemini) ===
+      let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
       let iaUsada = 'fallback';
 
       const promptText = `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e do treino anterior e gere um comentário técnico, motivacional e positivo de 6 a 9 linhas completas. Destaque a duração da aula (${aulaDuracaoMin} minutos) em relação à intensidade geral, tempo nas zonas 2, 3, 4 e 5, melhora ou piora no comparativo, recuperação e dê 1 ou 2 dicas práticas pro próximo treino. Use tom encorajador, linguagem simples e direta. Não corte o texto, escreva o comentário completo.
@@ -177,16 +175,17 @@ Dados do treino anterior (comparativo):
 Nome do aluno: ${aluno.name.split(' ')[0]}
 Data da aula de hoje: ${classDate}`;
 
-      // ── 1. TENTATIVAS COM GEMINI (3x com delay de 60s) ───────────────────────
-      const maxRetriesGemini = 3;
+      const maxRetries = 5;
+      let attempt = 0;
       let geminiSuccess = false;
 
-      for (let attempt = 1; attempt <= maxRetriesGemini && !geminiSuccess; attempt++) {
+      while (attempt < maxRetries && !geminiSuccess) {
+        attempt++;
         try {
-          console.log(`[GEMINI] Tentativa ${attempt}/${maxRetriesGemini} para ${aluno.name}`);
+          console.log(`[GEMINI] Tentativa ${attempt}/${maxRetries} para ${aluno.name} (timeout 90s)`);
 
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 60000);
+          const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 segundos por tentativa
 
           const geminiResponse = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -196,7 +195,10 @@ Data da aula de hoje: ${classDate}`;
               signal: controller.signal,
               body: JSON.stringify({
                 contents: [{ parts: [{ text: promptText }] }],
-                generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
+                generationConfig: {
+                  temperature: 0.7,
+                  maxOutputTokens: 8192
+                }
               })
             }
           );
@@ -207,18 +209,18 @@ Data da aula de hoje: ${classDate}`;
             const errorText = await geminiResponse.text();
             console.error(`[GEMINI ERRO] Tentativa ${attempt} - HTTP ${geminiResponse.status}: ${errorText}`);
 
-            if ([503, 429, 500, 502, 504].includes(geminiResponse.status)) {
-              if (attempt < maxRetriesGemini) {
-                console.log(`[GEMINI RETRY] Aguardando 60 segundos para tentativa ${attempt + 1}...`);
-                await new Promise(r => setTimeout(r, 60000));
-              }
-              continue;
+            // Continua retry para erros recuperáveis (503, 429, 5xx)
+            if (attempt < maxRetries) {
+              const delay = attempt * 30 * 1000; // 30s, 60s, 90s, 120s, 150s
+              console.log(`[GEMINI RETRY] Aguardando ${delay/1000} segundos para tentativa ${attempt + 1}...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
             }
-            throw new Error(`Gemini erro não recuperável`);
+            continue;
           }
 
           const json = await geminiResponse.json();
-          if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+
+          if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
             comentarioIA = json.candidates[0].content.parts[0].text.trim();
             geminiSuccess = true;
             iaUsada = 'gemini';
@@ -226,56 +228,24 @@ Data da aula de hoje: ${classDate}`;
           } else {
             console.warn(`[GEMINI] Resposta inválida na tentativa ${attempt}`);
           }
+
         } catch (err) {
-          console.error(`[GEMINI FALHA] Tentativa ${attempt}: ${err.message}`);
-          if (attempt < maxRetriesGemini) {
-            await new Promise(r => setTimeout(r, 60000));
+          console.error(`[GEMINI FALHA] Tentativa ${attempt} para ${aluno.name}: ${err.message}`);
+          if (err.name === 'AbortError') {
+            console.error('[GEMINI] Timeout de 90 segundos atingido');
+          }
+
+          if (attempt < maxRetries) {
+            const delay = attempt * 30 * 1000;
+            console.log(`[GEMINI RETRY] Aguardando ${delay/1000} segundos...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
           }
         }
       }
 
-      // ── 2. SE GEMINI FALHOU → TENTA DEEPSEEK (1 tentativa) ─────────────────────
-      if (!geminiSuccess && process.env.DEEPSEEK_API_KEY) {
-        try {
-          console.log(`[DEEPSEEK] Gemini falhou → tentando DeepSeek para ${aluno.name}`);
-
-          const deepseekResponse = await fetch('https://api.deepseek.com/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-            },
-            body: JSON.stringify({
-              model: 'deepseek-chat',
-              messages: [
-                { role: 'system', content: 'Você é um treinador experiente de CrossFit, corrida e esportes. Responda de forma técnica, motivacional e positiva.' },
-                { role: 'user', content: promptText }
-              ],
-              temperature: 0.7,
-              max_tokens: 1200,
-              stream: false
-            })
-          });
-
-          if (!deepseekResponse.ok) {
-            const errText = await deepseekResponse.text();
-            console.error(`[DEEPSEEK ERRO] HTTP ${deepseekResponse.status}: ${errText}`);
-            throw new Error('DeepSeek falhou');
-          }
-
-          const json = await deepseekResponse.json();
-          if (json.choices?.[0]?.message?.content) {
-            comentarioIA = json.choices[0].message.content.trim();
-            iaUsada = 'deepseek';
-            console.log(`[DEEPSEEK SUCESSO] Comentário gerado (${comentarioIA.length} chars)`);
-          }
-        } catch (err) {
-          console.error(`[DEEPSEEK FALHA] ${err.message}`);
-        }
+      if (!geminiSuccess) {
+        console.warn(`[GEMINI FINAL] Todas ${maxRetries} tentativas falharam para ${aluno.name} → usando fallback`);
       }
-
-      // Log final da IA usada
-      console.log(`[IA FINAL] Usando ${iaUsada} para ${aluno.name}`);
 
       // Monta o HTML com duração da aula e novas zonas
       const html = `

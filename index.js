@@ -290,7 +290,7 @@ sessionsRouter.get('/:id', async (req, res) => {
   }
 });
 
-// Ranking semanal (exemplo completo baseado no seu código truncado)
+// Ranking semanal
 sessionsRouter.get('/ranking-semanal', async (req, res) => {
   const { gender, metric = 'queima_points', limit = 10 } = req.query;
 
@@ -685,7 +685,7 @@ app.get('/api/sessions/:id', async (req, res) => {
 app.use('/api/sessions', sessionsRouter);
 
 // ────────────────────────────────────────────────────────────────
-// NOVAS ROTAS DE TESTE PARA MODELOS GEMINI (sem alterar nada existente)
+// ROTAS DE TESTE PARA GEMINI (mantidas)
 // ────────────────────────────────────────────────────────────────
 
 // Teste com gemini-2.5-flash-lite (recomendado para menos 503)
@@ -745,7 +745,7 @@ app.get('/test-gemini-lite', async (req, res) => {
   }
 });
 
-// Teste com gemini-1.5-flash (para comparar com o que você usava antes)
+// Teste com gemini-1.5-flash
 app.get('/test-gemini-15flash', async (req, res) => {
   console.log('[TEST-GEMINI-1.5] Rota acessada - testando gemini-1.5-flash');
 
@@ -801,7 +801,8 @@ app.get('/test-gemini-15flash', async (req, res) => {
     });
   }
 });
-// Rota de teste REALISTA do prompt do e-mail (simula send-class-summary-email.js)
+
+// Rota de teste REALISTA do prompt do e-mail
 app.get('/test-gemini-email-prompt', async (req, res) => {
   console.log('[TEST-GEMINI-EMAIL] Rota acessada - simulando prompt completo do e-mail');
 
@@ -810,7 +811,6 @@ app.get('/test-gemini-email-prompt', async (req, res) => {
       throw new Error('GEMINI_API_KEY não encontrada');
     }
 
-    // ── Dados simulados (copie/colou do seu log real ou ajuste como quiser) ──
     const aulaDuracaoMin = 60;
     const aluno = {
       name: 'Robson',
@@ -848,7 +848,7 @@ app.get('/test-gemini-email-prompt', async (req, res) => {
     const classDate = '28/01/2026';
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s para prompts longos
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
 
     console.log('[TEST-GEMINI-EMAIL] Enviando prompt completo para Gemini...');
 
@@ -934,243 +934,6 @@ Data da aula de hoje: ${classDate}`
   }
 });
 
-
-// ────────────────────────────────────────────────────────────────
-// ROTA DE TESTE PARA DEEPSEEK API (valida a chave e o endpoint)
-// Acesse: /test-deepseek
-// ────────────────────────────────────────────────────────────────
-app.get('/test-deepseek', async (req, res) => {
-  console.log('[TEST-DEEPSEEK] Rota acessada - validando API key');
-
-  try {
-    // Verifica se a chave existe no environment (Render ou .env)
-    if (!process.env.DEEPSEEK_API_KEY) {
-      console.error('[TEST-DEEPSEEK] DEEPSEEK_API_KEY não encontrada no environment');
-      return res.status(500).json({
-        success: false,
-        error: 'DEEPSEEK_API_KEY não configurada no Render / .env'
-      });
-    }
-
-    console.log('[TEST-DEEPSEEK] Chave encontrada, enviando teste simples...');
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 segundos de timeout
-
-    const response = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          {
-            role: 'user',
-            content: 'Teste simples: responda apenas com "DeepSeek API está funcionando perfeitamente!" se tudo estiver ok.'
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 50,
-        stream: false
-      })
-    });
-
-    clearTimeout(timeoutId);
-
-    console.log('[TEST-DEEPSEEK] Status HTTP recebido:', response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[TEST-DEEPSEEK] Erro na API:', response.status, errorText);
-      return res.status(response.status).json({
-        success: false,
-        error: `DeepSeek retornou erro HTTP ${response.status}: ${errorText}`
-      });
-    }
-
-    const json = await response.json();
-    console.log('[TEST-DEEPSEEK] Resposta completa:', JSON.stringify(json, null, 2));
-
-    const textoResposta = json.choices?.[0]?.message?.content?.trim() || 'Sem texto na resposta';
-
-    res.json({
-      success: true,
-      resposta: textoResposta,
-      model: 'deepseek-chat',
-      status: response.status,
-      jsonCompleto: json
-    });
-
-  } catch (err) {
-    console.error('[TEST-DEEPSEEK] Erro completo:', err.message);
-    if (err.name === 'AbortError') {
-      console.error('[TEST-DEEPSEEK] Timeout: DeepSeek demorou mais de 20 segundos');
-    }
-    res.status(500).json({
-      success: false,
-      error: err.message,
-      stack: err.stack ? err.stack.substring(0, 300) : 'Sem stack'
-    });
-  }
-});
-
-// ────────────────────────────────────────────────────────────────
-// ROTA DE TESTE PARA OPENROUTER API (valida chave e endpoint)
-// Acesse: https://wodpulse-back.onrender.com/test-openrouter
-// ────────────────────────────────────────────────────────────────
-app.get('/test-openrouter', async (req, res) => {
-  console.log('[TEST-OPENROUTER] Rota acessada - validando API key');
-
-  try {
-    if (!process.env.OPENROUTER_API_KEY) {
-      console.error('[TEST-OPENROUTER] OPENROUTER_API_KEY não encontrada');
-      return res.status(500).json({
-        success: false,
-        error: 'OPENROUTER_API_KEY não configurada no Render / .env'
-      });
-    }
-
-    console.log('[TEST-OPENROUTER] Chave encontrada, enviando teste simples...');
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
-
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'HTTP-Referer': 'https://wodpulse.com', // opcional, mas ajuda no tracking
-        'X-Title': 'WODPulse Test'              // opcional
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: 'nousresearch/hermes-3-llama-3.1-405b:free', // modelo free grande e bom
-        messages: [
-          {
-            role: 'user',
-            content: 'Teste simples OpenRouter: responda apenas com "OpenRouter está funcionando 100%!" se tudo ok.'
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 50
-      })
-    });
-
-    clearTimeout(timeoutId);
-
-    console.log('[TEST-OPENROUTER] Status HTTP:', response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[TEST-OPENROUTER] Erro:', response.status, errorText);
-      return res.status(response.status).json({
-        success: false,
-        error: `OpenRouter retornou HTTP ${response.status}: ${errorText}`
-      });
-    }
-
-    const json = await response.json();
-    const texto = json.choices?.[0]?.message?.content?.trim() || 'Sem resposta';
-
-    res.json({
-      success: true,
-      resposta: texto,
-      model: 'meta-llama/llama-3.1-8b-instruct:free',
-      status: response.status,
-      jsonCompleto: json
-    });
-
-  } catch (err) {
-    console.error('[TEST-OPENROUTER] Erro completo:', err.message);
-    res.status(500).json({
-      success: false,
-      error: err.message
-    });
-  }
-});
-// ────────────────────────────────────────────────────────────────
-// ROTA DE TESTE PARA GROQ API (valida chave e endpoint)
-// Acesse: https://wodpulse-back.onrender.com/test-groq
-// ────────────────────────────────────────────────────────────────
-app.get('/test-groq', async (req, res) => {
-  console.log('[TEST-GROQ] Rota acessada - validando API key');
-
-  try {
-    if (!process.env.GROQ_API_KEY) {
-      console.error('[TEST-GROQ] GROQ_API_KEY não encontrada no environment');
-      return res.status(500).json({
-        success: false,
-        error: 'GROQ_API_KEY não configurada no Render / .env'
-      });
-    }
-
-    console.log('[TEST-GROQ] Chave encontrada, enviando teste simples...');
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 segundos timeout
-
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: 'llama-3.1-70b-versatile',  // modelo free mais forte e rápido no Groq
-        messages: [
-          {
-            role: 'user',
-            content: 'Teste simples Groq: responda apenas com "Groq API está funcionando perfeitamente!" se tudo estiver ok.'
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 50
-      })
-    });
-
-    clearTimeout(timeoutId);
-
-    console.log('[TEST-GROQ] Status HTTP recebido:', response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[TEST-GROQ] Erro na API:', response.status, errorText);
-      return res.status(response.status).json({
-        success: false,
-        error: `Groq retornou erro HTTP ${response.status}: ${errorText}`
-      });
-    }
-
-    const json = await response.json();
-    console.log('[TEST-GROQ] Resposta completa:', JSON.stringify(json, null, 2));
-
-    const textoResposta = json.choices?.[0]?.message?.content?.trim() || 'Sem texto na resposta';
-
-    res.json({
-      success: true,
-      resposta: textoResposta,
-      model: 'llama-3.3-70b-versatile',
-      status: response.status,
-      jsonCompleto: json
-    });
-
-  } catch (err) {
-    console.error('[TEST-GROQ] Erro completo:', err.message);
-    if (err.name === 'AbortError') {
-      console.error('[TEST-GROQ] Timeout: Groq demorou mais de 20 segundos');
-    }
-    res.status(500).json({
-      success: false,
-      error: err.message,
-      stack: err.stack ? err.stack.substring(0, 300) : 'Sem stack'
-    });
-  }
-});
 // Inicia o servidor
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);
