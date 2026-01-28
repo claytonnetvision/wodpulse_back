@@ -137,7 +137,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
-      // === INTEGRAÇÃO GEMINI: 2.5-FLASH-LITE PRIMEIRO → 2.0-FLASH COMO FALLBACK ===
+      // === INTEGRAÇÃO GEMINI: 2.5-FLASH-LITE PRIMEIRO → 2.5-FLASH COMO FALLBACK ===
       let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
       let iaUsada = 'fallback';
 
@@ -176,8 +176,8 @@ Nome do aluno: ${aluno.name.split(' ')[0]}
 Data da aula de hoje: ${classDate}`;
 
       const modelsToTry = [
-        'gemini-2.5-flash-lite',     // Primeiro: o atual que está funcionando bem
-        'gemini-2.0-flash'           // Fallback: da sua lista de modelos disponíveis
+        'gemini-2.5-flash-lite',     // Primeiro: o que está funcionando perfeitamente
+        'gemini-2.5-flash'           // Fallback: caso o lite falhe
       ];
 
       let success = false;

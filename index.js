@@ -685,10 +685,10 @@ app.get('/api/sessions/:id', async (req, res) => {
 app.use('/api/sessions', sessionsRouter);
 
 // ────────────────────────────────────────────────────────────────
-// ROTAS DE TESTE PARA GEMINI (mantidas)
+// ROTAS DE TESTE PARA GEMINI (apenas as que funcionam)
 // ────────────────────────────────────────────────────────────────
 
-// Teste com gemini-2.5-flash-lite (recomendado para menos 503)
+// Teste com gemini-2.5-flash-lite (principal - funcionando)
 app.get('/test-gemini-lite', async (req, res) => {
   console.log('[TEST-GEMINI-LITE] Rota acessada - testando gemini-2.5-flash-lite');
 
@@ -745,64 +745,7 @@ app.get('/test-gemini-lite', async (req, res) => {
   }
 });
 
-// Teste com gemini-1.5-flash
-app.get('/test-gemini-15flash', async (req, res) => {
-  console.log('[TEST-GEMINI-1.5] Rota acessada - testando gemini-1.5-flash');
-
-  try {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY não encontrada');
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: 'Teste Gemini 1.5 Flash: responda apenas com "1.5 Flash ok!" se tudo certo.' }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 50
-          }
-        })
-      }
-    );
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
-
-    const json = await response.json();
-    const texto = json.candidates?.[0]?.content?.parts?.[0]?.text || 'Sem resposta';
-
-    res.json({
-      success: true,
-      resposta: texto.trim(),
-      model: 'gemini-1.5-flash',
-      status: response.status,
-      jsonCompleto: json
-    });
-  } catch (err) {
-    console.error('[TEST-GEMINI-1.5] Erro:', err.message);
-    res.status(500).json({
-      success: false,
-      error: err.message,
-      model: 'gemini-1.5-flash'
-    });
-  }
-});
-
-// Rota de teste REALISTA do prompt do e-mail
+// Rota de teste REALISTA do prompt do e-mail (simula send-class-summary-email.js)
 app.get('/test-gemini-email-prompt', async (req, res) => {
   console.log('[TEST-GEMINI-EMAIL] Rota acessada - simulando prompt completo do e-mail');
 
@@ -933,65 +876,7 @@ Data da aula de hoje: ${classDate}`
     });
   }
 });
-// Teste Gemini 1.5 Flash (primeiro que você quer usar)
-app.get('/test-gemini-15flash', async (req, res) => {
-  console.log('[TEST-GEMINI-1.5] Iniciando teste');
 
-  try {
-    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY não encontrada');
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Teste: responda "1.5 Flash OK!" se funcionando.' }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 50 }
-        })
-      }
-    );
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const json = await response.json();
-    const texto = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Sem resposta';
-
-    res.json({ success: true, resposta: texto, model: 'gemini-1.5-flash' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Teste Gemini 2.5 Flash Lite (fallback)
-app.get('/test-gemini-lite', async (req, res) => {
-  console.log('[TEST-GEMINI-LITE] Iniciando teste');
-
-  try {
-    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY não encontrada');
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Teste: responda "Lite OK!" se funcionando.' }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 50 }
-        })
-      }
-    );
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const json = await response.json();
-    const texto = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Sem resposta';
-
-    res.json({ success: true, resposta: texto, model: 'gemini-2.5-flash-lite' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 // Inicia o servidor
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);
