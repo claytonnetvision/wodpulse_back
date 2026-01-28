@@ -1092,6 +1092,85 @@ app.get('/test-openrouter', async (req, res) => {
     });
   }
 });
+// ────────────────────────────────────────────────────────────────
+// ROTA DE TESTE PARA GROQ API (valida chave e endpoint)
+// Acesse: https://wodpulse-back.onrender.com/test-groq
+// ────────────────────────────────────────────────────────────────
+app.get('/test-groq', async (req, res) => {
+  console.log('[TEST-GROQ] Rota acessada - validando API key');
+
+  try {
+    if (!process.env.GROQ_API_KEY) {
+      console.error('[TEST-GROQ] GROQ_API_KEY não encontrada no environment');
+      return res.status(500).json({
+        success: false,
+        error: 'GROQ_API_KEY não configurada no Render / .env'
+      });
+    }
+
+    console.log('[TEST-GROQ] Chave encontrada, enviando teste simples...');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 segundos timeout
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'llama-3.1-70b-versatile',  // modelo free mais forte e rápido no Groq
+        messages: [
+          {
+            role: 'user',
+            content: 'Teste simples Groq: responda apenas com "Groq API está funcionando perfeitamente!" se tudo estiver ok.'
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 50
+      })
+    });
+
+    clearTimeout(timeoutId);
+
+    console.log('[TEST-GROQ] Status HTTP recebido:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[TEST-GROQ] Erro na API:', response.status, errorText);
+      return res.status(response.status).json({
+        success: false,
+        error: `Groq retornou erro HTTP ${response.status}: ${errorText}`
+      });
+    }
+
+    const json = await response.json();
+    console.log('[TEST-GROQ] Resposta completa:', JSON.stringify(json, null, 2));
+
+    const textoResposta = json.choices?.[0]?.message?.content?.trim() || 'Sem texto na resposta';
+
+    res.json({
+      success: true,
+      resposta: textoResposta,
+      model: 'llama-3.1-70b-versatile',
+      status: response.status,
+      jsonCompleto: json
+    });
+
+  } catch (err) {
+    console.error('[TEST-GROQ] Erro completo:', err.message);
+    if (err.name === 'AbortError') {
+      console.error('[TEST-GROQ] Timeout: Groq demorou mais de 20 segundos');
+    }
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      stack: err.stack ? err.stack.substring(0, 300) : 'Sem stack'
+    });
+  }
+});
 // Inicia o servidor
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);
