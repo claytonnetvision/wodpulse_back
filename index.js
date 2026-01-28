@@ -801,7 +801,138 @@ app.get('/test-gemini-15flash', async (req, res) => {
     });
   }
 });
+// Rota de teste REALISTA do prompt do e-mail (simula send-class-summary-email.js)
+app.get('/test-gemini-email-prompt', async (req, res) => {
+  console.log('[TEST-GEMINI-EMAIL] Rota acessada - simulando prompt completo do e-mail');
 
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('GEMINI_API_KEY não encontrada');
+    }
+
+    // ── Dados simulados (copie/colou do seu log real ou ajuste como quiser) ──
+    const aulaDuracaoMin = 60;
+    const aluno = {
+      name: 'Robson',
+      calories: 563,
+      queima_points: 0,
+      vo2_time_seconds: 0,
+      min_red: 0,
+      min_zone2: 9,
+      min_zone3: 0,
+      min_zone4: 1,
+      min_zone5: 0,
+      avg_hr: 114,
+      max_hr_reached: 155,
+      real_resting_hr: 61,
+      trimp_total: 0,
+      epoc_estimated: 2
+    };
+
+    const prev = {
+      calories: 71,
+      queima_points: 0,
+      vo2_time_seconds: 0,
+      min_red: 0,
+      min_zone2: 0,
+      min_zone3: 0,
+      min_zone4: 0,
+      min_zone5: 0,
+      avg_hr: 0,
+      max_hr_reached: 93,
+      real_resting_hr: 77,
+      trimp_total: 0,
+      epoc_estimated: 0
+    };
+
+    const classDate = '28/01/2026';
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s para prompts longos
+
+    console.log('[TEST-GEMINI-EMAIL] Enviando prompt completo para Gemini...');
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e do treino anterior e gere um comentário técnico, motivacional e positivo de 6 a 9 linhas completas. Destaque a duração da aula (${aulaDuracaoMin} minutos) em relação à intensidade geral, tempo nas zonas 2, 3, 4 e 5, melhora ou piora no comparativo, recuperação e dê 1 ou 2 dicas práticas pro próximo treino. Use tom encorajador, linguagem simples e direta. Não corte o texto, escreva o comentário completo.
+
+Dados de hoje:
+- Duração da aula: ${aulaDuracaoMin} minutos
+- Calorias: ${Math.round(aluno.calories)} kcal
+- Queima Points: ${Math.round(aluno.queima_points)}
+- Zona 2 (60-70%): ${Math.round(aluno.min_zone2)} min
+- Zona 3 (70-80%): ${Math.round(aluno.min_zone3)} min
+- Zona 4 (80-90%): ${Math.round(aluno.min_zone4)} min
+- Zona 5 (>90%): ${Math.round(aluno.min_zone5)} min
+- Tempo VO₂ Máx: ${Math.round(aluno.vo2_time_seconds / 60)} min
+- TRIMP Total: ${Number(aluno.trimp_total || 0).toFixed(1)}
+- EPOC Estimado (queima pós-treino): ${Math.round(aluno.epoc_estimated || 0)} kcal
+- FC Média: ${Math.round(aluno.avg_hr || 0)} bpm
+- FC Máxima atingida: ${Math.round(aluno.max_hr_reached || 0)} bpm
+- FC Repouso real: ${Math.round(aluno.real_resting_hr || 0)} bpm
+
+Dados do treino anterior (comparativo):
+- Calorias: ${Math.round(prev.calories)} kcal
+- Queima Points: ${Math.round(prev.queima_points)}
+- Zona 2 (60-70%): ${Math.round(prev.min_zone2)} min
+- Zona 3 (70-80%): ${Math.round(prev.min_zone3)} min
+- Zona 4 (80-90%): ${Math.round(prev.min_zone4)} min
+- Zona 5 (>90%): ${Math.round(prev.min_zone5)} min
+- Tempo VO₂ Máx: ${Math.round(prev.vo2_time_seconds / 60)} min
+- TRIMP Total: ${Number(prev.trimp_total || 0).toFixed(1)}
+- EPOC Estimado (queima pós-treino): ${Math.round(prev.epoc_estimated || 0)} kcal
+- FC Média: ${Math.round(prev.avg_hr || 0)} bpm
+- FC Máxima atingida: ${Math.round(prev.max_hr_reached || 0)} bpm
+- FC Repouso real: ${Math.round(prev.real_resting_hr || 0)} bpm
+
+Nome do aluno: ${aluno.name.split(' ')[0]}
+Data da aula de hoje: ${classDate}`
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 8192
+          }
+        })
+      }
+    );
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[TEST-GEMINI-EMAIL] Erro:', response.status, errorText);
+      throw new Error(`Gemini retornou ${response.status}: ${errorText}`);
+    }
+
+    const json = await response.json();
+    const comentario = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Sem comentário gerado';
+
+    console.log('[TEST-GEMINI-EMAIL] Comentário gerado:', comentario.substring(0, 200) + '...');
+
+    res.json({
+      success: true,
+      comentario_gerado: comentario,
+      model: 'gemini-2.5-flash-lite',
+      duracao: aulaDuracaoMin,
+      status: response.status
+    });
+  } catch (err) {
+    console.error('[TEST-GEMINI-EMAIL] Falha:', err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      model: 'gemini-2.5-flash-lite'
+    });
+  }
+});
 // Inicia o servidor
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);
