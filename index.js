@@ -933,7 +933,65 @@ Data da aula de hoje: ${classDate}`
     });
   }
 });
+// Teste Gemini 1.5 Flash (primeiro que você quer usar)
+app.get('/test-gemini-15flash', async (req, res) => {
+  console.log('[TEST-GEMINI-1.5] Iniciando teste');
 
+  try {
+    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY não encontrada');
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Teste: responda "1.5 Flash OK!" se funcionando.' }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 50 }
+        })
+      }
+    );
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const json = await response.json();
+    const texto = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Sem resposta';
+
+    res.json({ success: true, resposta: texto, model: 'gemini-1.5-flash' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Teste Gemini 2.5 Flash Lite (fallback)
+app.get('/test-gemini-lite', async (req, res) => {
+  console.log('[TEST-GEMINI-LITE] Iniciando teste');
+
+  try {
+    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY não encontrada');
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Teste: responda "Lite OK!" se funcionando.' }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 50 }
+        })
+      }
+    );
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const json = await response.json();
+    const texto = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Sem resposta';
+
+    res.json({ success: true, resposta: texto, model: 'gemini-2.5-flash-lite' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 // Inicia o servidor
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);

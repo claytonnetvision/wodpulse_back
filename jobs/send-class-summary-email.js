@@ -137,7 +137,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
-      // === INTEGRAÇÃO GEMINI COM RETRY AGRESSIVO (apenas Gemini) ===
+      // === INTEGRAÇÃO GEMINI COM RETRY + FALLBACK PARA 1.5-FLASH ===
       let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
       let iaUsada = 'fallback';
 
@@ -175,76 +175,85 @@ Dados do treino anterior (comparativo):
 Nome do aluno: ${aluno.name.split(' ')[0]}
 Data da aula de hoje: ${classDate}`;
 
-      const maxRetries = 5;
-      let attempt = 0;
-      let geminiSuccess = false;
+      const modelsToTry = [
+        'gemini-1.5-flash',          // Primeiro: o que você quer testar
+        'gemini-2.5-flash-lite'      // Fallback se 1.5 falhar
+      ];
 
-      while (attempt < maxRetries && !geminiSuccess) {
-        attempt++;
-        try {
-          console.log(`[GEMINI] Tentativa ${attempt}/${maxRetries} para ${aluno.name} (timeout 90s)`);
+      let success = false;
 
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 segundos por tentativa
+      for (const model of modelsToTry) {
+        if (success) break;
 
-          const geminiResponse = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              signal: controller.signal,
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: promptText }] }],
-                generationConfig: {
-                  temperature: 0.7,
-                  maxOutputTokens: 8192
-                }
-              })
+        const maxRetries = 3;
+        let attempt = 0;
+
+        while (attempt < maxRetries && !success) {
+          attempt++;
+          try {
+            console.log(`[GEMINI] Tentativa ${attempt}/${maxRetries} - Modelo: ${model} - Aluno: ${aluno.name}`);
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s por tentativa
+
+            const response = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: controller.signal,
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: promptText }] }],
+                  generationConfig: {
+                    temperature: 0.7,
+                    maxOutputTokens: 8192
+                  }
+                })
+              }
+            );
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              console.error(`[GEMINI ERRO] ${model} - Tentativa ${attempt} - HTTP ${response.status}: ${errorText}`);
+
+              if (attempt < maxRetries) {
+                const delay = attempt * 30 * 1000; // 30s → 60s → 90s
+                console.log(`[GEMINI RETRY] Aguardando ${delay/1000}s para próxima tentativa (${model})...`);
+                await new Promise(r => setTimeout(r, delay));
+              }
+              continue;
             }
-          );
 
-          clearTimeout(timeoutId);
+            const json = await response.json();
 
-          if (!geminiResponse.ok) {
-            const errorText = await geminiResponse.text();
-            console.error(`[GEMINI ERRO] Tentativa ${attempt} - HTTP ${geminiResponse.status}: ${errorText}`);
+            if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
+              comentarioIA = json.candidates[0].content.parts[0].text.trim();
+              success = true;
+              iaUsada = model;
+              console.log(`[GEMINI SUCESSO] Modelo ${model} - Tentativa ${attempt} - ${comentarioIA.length} chars`);
+            } else {
+              console.warn(`[GEMINI] Resposta inválida (${model}) - Tentativa ${attempt}`);
+            }
 
-            // Continua retry para erros recuperáveis (503, 429, 5xx)
+          } catch (err) {
+            console.error(`[GEMINI FALHA] ${model} - Tentativa ${attempt}: ${err.message}`);
+            if (err.name === 'AbortError') {
+              console.error(`[GEMINI] Timeout 90s atingido (${model})`);
+            }
+
             if (attempt < maxRetries) {
-              const delay = attempt * 30 * 1000; // 30s, 60s, 90s, 120s, 150s
-              console.log(`[GEMINI RETRY] Aguardando ${delay/1000} segundos para tentativa ${attempt + 1}...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
+              const delay = attempt * 30 * 1000;
+              console.log(`[GEMINI RETRY] Aguardando ${delay/1000}s...`);
+              await new Promise(r => setTimeout(r, delay));
             }
-            continue;
-          }
-
-          const json = await geminiResponse.json();
-
-          if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
-            comentarioIA = json.candidates[0].content.parts[0].text.trim();
-            geminiSuccess = true;
-            iaUsada = 'gemini';
-            console.log(`[GEMINI SUCESSO] Comentário gerado na tentativa ${attempt} (${comentarioIA.length} chars)`);
-          } else {
-            console.warn(`[GEMINI] Resposta inválida na tentativa ${attempt}`);
-          }
-
-        } catch (err) {
-          console.error(`[GEMINI FALHA] Tentativa ${attempt} para ${aluno.name}: ${err.message}`);
-          if (err.name === 'AbortError') {
-            console.error('[GEMINI] Timeout de 90 segundos atingido');
-          }
-
-          if (attempt < maxRetries) {
-            const delay = attempt * 30 * 1000;
-            console.log(`[GEMINI RETRY] Aguardando ${delay/1000} segundos...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
           }
         }
       }
 
-      if (!geminiSuccess) {
-        console.warn(`[GEMINI FINAL] Todas ${maxRetries} tentativas falharam para ${aluno.name} → usando fallback`);
+      if (!success) {
+        console.warn(`[GEMINI FINAL] Todos os modelos/tentativas falharam para ${aluno.name} → usando fallback`);
       }
 
       // Monta o HTML com duração da aula e novas zonas
