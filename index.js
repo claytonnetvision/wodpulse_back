@@ -684,6 +684,124 @@ app.get('/api/sessions/:id', async (req, res) => {
 // Monta o router de sessions
 app.use('/api/sessions', sessionsRouter);
 
+// ────────────────────────────────────────────────────────────────
+// NOVAS ROTAS DE TESTE PARA MODELOS GEMINI (sem alterar nada existente)
+// ────────────────────────────────────────────────────────────────
+
+// Teste com gemini-2.5-flash-lite (recomendado para menos 503)
+app.get('/test-gemini-lite', async (req, res) => {
+  console.log('[TEST-GEMINI-LITE] Rota acessada - testando gemini-2.5-flash-lite');
+
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('GEMINI_API_KEY não encontrada');
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: 'Teste Gemini 2.5 Flash-Lite: responda apenas com "Lite está funcionando 100%!" se ok.' }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 50
+          }
+        })
+      }
+    );
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const json = await response.json();
+    const texto = json.candidates?.[0]?.content?.parts?.[0]?.text || 'Sem resposta';
+
+    res.json({
+      success: true,
+      resposta: texto.trim(),
+      model: 'gemini-2.5-flash-lite',
+      status: response.status,
+      jsonCompleto: json
+    });
+  } catch (err) {
+    console.error('[TEST-GEMINI-LITE] Erro:', err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      model: 'gemini-2.5-flash-lite'
+    });
+  }
+});
+
+// Teste com gemini-1.5-flash (para comparar com o que você usava antes)
+app.get('/test-gemini-15flash', async (req, res) => {
+  console.log('[TEST-GEMINI-1.5] Rota acessada - testando gemini-1.5-flash');
+
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('GEMINI_API_KEY não encontrada');
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: 'Teste Gemini 1.5 Flash: responda apenas com "1.5 Flash ok!" se tudo certo.' }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 50
+          }
+        })
+      }
+    );
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const json = await response.json();
+    const texto = json.candidates?.[0]?.content?.parts?.[0]?.text || 'Sem resposta';
+
+    res.json({
+      success: true,
+      resposta: texto.trim(),
+      model: 'gemini-1.5-flash',
+      status: response.status,
+      jsonCompleto: json
+    });
+  } catch (err) {
+    console.error('[TEST-GEMINI-1.5] Erro:', err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      model: 'gemini-1.5-flash'
+    });
+  }
+});
+
 // Inicia o servidor
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);

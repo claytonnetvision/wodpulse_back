@@ -151,8 +151,9 @@ sessionsRouter.post('/', async (req, res) => {
           queima_points, calories, vo2_time_seconds, epoc_estimated,
           real_resting_hr, avg_hr, max_hr_reached, created_at,
           min_gray, min_green, min_blue, min_yellow, min_orange, min_red,
+          min_zone2, min_zone3, min_zone4, min_zone5,
           trimp_total, calories_total
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, $17)`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
         [
           sessionId,
           p.participantId,
@@ -169,6 +170,10 @@ sessionsRouter.post('/', async (req, res) => {
           Number(p.min_yellow) || 0,
           Number(p.min_orange) || 0,
           Number(p.min_red) || 0,
+          Number(p.min_zone2) || 0,
+          Number(p.min_zone3) || 0,
+          Number(p.min_zone4) || 0,
+          Number(p.min_zone5) || 0,
           Number(p.trimp_total) || 0,
           Number(p.calories_total) || 0
         ]
@@ -359,7 +364,11 @@ app.get('/api/participants/ranking-acumulado', async (req, res) => {
       SUM(sp.min_red) AS total_tempo_vermelho_min,
       SUM(sp.queima_points) AS total_queima_points,
       AVG(sp.trimp_total) AS trimp_medio,
-      AVG(sp.epoc_estimated) AS epoc_medio
+      AVG(sp.epoc_estimated) AS epoc_medio,
+      SUM(sp.min_zone2) AS total_min_zone2,
+      SUM(sp.min_zone3) AS total_min_zone3,
+      SUM(sp.min_zone4) AS total_min_zone4,
+      SUM(sp.min_zone5) AS total_min_zone5
     FROM participants p
     LEFT JOIN session_participants sp ON sp.participant_id = p.id
     LEFT JOIN sessions s ON s.id = sp.session_id
@@ -415,7 +424,11 @@ app.get('/api/sessions/historico', async (req, res) => {
       sp.queima_points,
       sp.trimp_total,
       sp.epoc_estimated,
-      sp.real_resting_hr
+      sp.real_resting_hr,
+      sp.min_zone2,
+      sp.min_zone3,
+      sp.min_zone4,
+      sp.min_zone5
     FROM sessions s
     JOIN session_participants sp ON sp.session_id = s.id
     JOIN participants p ON p.id = sp.participant_id
