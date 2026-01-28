@@ -11,12 +11,12 @@ const pool = new Pool({
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'ns1234.hostgator.com',
   port: Number(process.env.EMAIL_PORT) || 465,
-  secure: process.env.EMAIL_SECURE === 'true' || true, // true para porta 465
+  secure: process.env.EMAIL_SECURE === 'true' || true,
   auth: {
     user: process.env.EMAIL_USER || 'contato@cfv6.com.br',
     pass: process.env.EMAIL_PASS || 'Academiacross@12',
   },
-  debug: true,          // liga logs detalhados (útil para debug, pode remover depois)
+  debug: true,
   logger: true,
 });
 
@@ -137,7 +137,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
-      // === INTEGRAÇÃO GEMINI COM RETRY + FALLBACK PARA 1.5-FLASH ===
+      // === INTEGRAÇÃO GEMINI: 2.5-FLASH-LITE PRIMEIRO → 2.0-FLASH COMO FALLBACK ===
       let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
       let iaUsada = 'fallback';
 
@@ -176,8 +176,8 @@ Nome do aluno: ${aluno.name.split(' ')[0]}
 Data da aula de hoje: ${classDate}`;
 
       const modelsToTry = [
-        'gemini-1.5-flash',          // Primeiro: o que você quer testar
-        'gemini-2.5-flash-lite'      // Fallback se 1.5 falhar
+        'gemini-2.5-flash-lite',     // Primeiro: o atual que está funcionando bem
+        'gemini-2.0-flash'           // Fallback: da sua lista de modelos disponíveis
       ];
 
       let success = false;
