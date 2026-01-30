@@ -86,7 +86,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
 
     // 3. Enviar para cada aluno
     for (const aluno of participantsRes.rows) {
-      // Busca o treino anterior
+      // Busca o treino anterior VÁLIDO do MESMO ALUNO (ignora sessões curtas/zeradas)
       const prevRes = await pool.query(`
         SELECT 
           sp.calories_total AS calories,
@@ -106,6 +106,8 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         JOIN sessions s ON s.id = sp.session_id
         WHERE sp.participant_id = $1
           AND s.date_start < $2
+          AND s.duration_minutes > 20  -- Ignora sessões muito curtas (testes)
+          AND sp.calories_total > 100  -- Ignora sessões zeradas/inválidas
         ORDER BY s.date_start DESC
         LIMIT 1
       `, [aluno.id, session.date_start]);
