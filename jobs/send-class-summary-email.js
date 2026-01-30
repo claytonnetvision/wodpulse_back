@@ -137,6 +137,34 @@ async function sendSummaryEmailsAfterClass(sessionId) {
         ? `Você queimou ${Math.round(aluno.calories)} kcal — equivalente a cerca de ${paesDeQueijo} pão de queijo! 🧀🔥` 
         : `Você queimou ${Math.round(aluno.calories)} kcal — continue firme pra queimar mais! 💪`;
 
+      // CÁLCULO DE FC MÉDIA ESTIMADA POR ZONAS (fallback se avg_hr for 0 ou null)
+      let fcMediaExibida = aluno.avg_hr;
+
+      if (!fcMediaExibida || fcMediaExibida <= 0) {
+        const tempoTotal = 
+          (aluno.min_zone2 || 0) + 
+          (aluno.min_zone3 || 0) + 
+          (aluno.min_zone4 || 0) + 
+          (aluno.min_zone5 || 0);
+
+        if (tempoTotal > 0 && aluno.max_hr_reached > 0) {
+          const somaPonderada = 
+            (aluno.min_zone2 || 0) * 65 +
+            (aluno.min_zone3 || 0) * 75 +
+            (aluno.min_zone4 || 0) * 85 +
+            (aluno.min_zone5 || 0) * 95;
+
+          const percentMedio = somaPonderada / tempoTotal;
+          fcMediaExibida = Math.round((percentMedio / 100) * aluno.max_hr_reached);
+          
+          console.log(`[EMAIL] FC média recalculada por zonas para ${aluno.name}: ${fcMediaExibida} bpm (base: ${aluno.max_hr_reached} bpm)`);
+        } else {
+          fcMediaExibida = '--'; // ou 0, se preferir
+        }
+      } else {
+        console.log(`[EMAIL] Usando FC média salva para ${aluno.name}: ${fcMediaExibida} bpm`);
+      }
+
       // === INTEGRAÇÃO GEMINI: 2.5-FLASH-LITE PRIMEIRO → 2.5-FLASH COMO FALLBACK ===
       let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
       let iaUsada = 'fallback';
@@ -154,7 +182,7 @@ Dados de hoje:
 - Tempo VO₂ Máx: ${Math.round(aluno.vo2_time_seconds / 60)} min
 - TRIMP Total: ${Number(aluno.trimp_total || 0).toFixed(1)}
 - EPOC Estimado (queima pós-treino): ${Math.round(aluno.epoc_estimated || 0)} kcal
-- FC Média: ${Math.round(aluno.avg_hr || 0)} bpm
+- FC Média: ${fcMediaExibida === '--' ? 'não disponível' : Math.round(fcMediaExibida) + ' bpm'}${fcMediaExibida !== aluno.avg_hr && fcMediaExibida !== '--' ? ' (estimada por zonas)' : ''}
 - FC Máxima atingida: ${Math.round(aluno.max_hr_reached || 0)} bpm
 - FC Repouso real: ${Math.round(aluno.real_resting_hr || 0)} bpm
 
@@ -314,7 +342,7 @@ Data da aula de hoje: ${classDate}`;
       <div class="metric">Tempo em VO₂ Máx: <span class="highlight">${Math.round(aluno.vo2_time_seconds / 60)} min</span></div>
       <div class="metric">TRIMP Total: <span class="highlight">${Number(aluno.trimp_total || 0).toFixed(1)}</span></div>
       <div class="metric">EPOC Estimado: <span class="highlight">${Math.round(aluno.epoc_estimated || 0)} kcal</span></div>
-      <div class="metric">FC Média: <span class="highlight">${Math.round(aluno.avg_hr || 0)} bpm</span></div>
+      <div class="metric">FC Média: <span class="highlight">${fcMediaExibida === '--' ? '--' : Math.round(fcMediaExibida)} bpm${fcMediaExibida !== aluno.avg_hr && fcMediaExibida !== '--' ? ' (estimada por zonas)' : ''}</span></div>
       <div class="metric">FC Máxima atingida: <span class="highlight">${Math.round(aluno.max_hr_reached || 0)} bpm</span></div>
       <div class="metric">FC Repouso real: <span class="highlight">${Math.round(aluno.real_resting_hr || '--')} bpm</span></div>
 
