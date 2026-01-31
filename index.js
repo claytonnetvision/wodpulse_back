@@ -6,7 +6,6 @@ const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// CORS explícito e seguro - libera apenas os domínios que você usa
 app.use(cors({
   origin: [
     'https://www.infrapower.com.br',
@@ -21,23 +20,20 @@ app.use(cors({
   optionsSuccessStatus: 204
 }));
 
-// Handler explícito para requisições OPTIONS (preflight do CORS)
 app.options('*', cors());
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Conexão com Neon PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
-// Testa conexão ao iniciar
 pool.connect()
   .then(() => console.log('→ Conectado ao PostgreSQL (Neon)'))
   .catch(err => console.error('Erro ao conectar no banco:', err.stack));
 
-// Ping periódico para manter Neon acordado (plano free)
 setInterval(async () => {
   try {
     await pool.query('SELECT 1');
@@ -45,9 +41,8 @@ setInterval(async () => {
   } catch (err) {
     console.error('[PING NEON] Falha ao manter banco acordado:', err.message);
   }
-}, 4 * 60 * 1000); // 4 minutos
+}, 4 * 60 * 1000);
 
-// Rota de teste simples
 app.get('/', (req, res) => {
   res.json({ 
     status: 'WODPulse Backend online', 
@@ -55,16 +50,11 @@ app.get('/', (req, res) => {
   });
 });
 
-// Rotas de autenticação
 app.use('/api/auth', require('./routes/auth'));
-
-// Rota para participantes
 app.use('/api/participants', require('./routes/participants'));
 
-// Rotas para sessões
 const sessionsRouter = express.Router();
 
-// POST /api/sessions - Salva sessão
 sessionsRouter.post('/', async (req, res) => {
   const { class_name, date_start, date_end, duration_minutes, box_id, participantsData } = req.body;
 
@@ -80,13 +70,12 @@ sessionsRouter.post('/', async (req, res) => {
     participantsData = [];
   }
 
-  // ── PROTEÇÃO: descartar aulas manuais muito curtas ────────────────────────────────
   let durationSeconds = 0;
   try {
     const start = new Date(date_start);
     const end = new Date(date_end);
     if (!isNaN(start) && !isNaN(end) && end > start) {
-      durationSeconds = Math.floor((end - start) / 1000); // segundos
+      durationSeconds = Math.floor((end - start) / 1000);
     } else {
       console.warn('[SESSION] Datas inválidas ou end < start → duração assumida como 0');
       durationSeconds = 0;
@@ -101,7 +90,7 @@ sessionsRouter.post('/', async (req, res) => {
     (class_name.toLowerCase().includes('manual') || 
      class_name === 'Aula Manual');
 
-  if (isManualClass && durationSeconds < 240) {  // menos de 4 minutos (240 segundos)
+  if (isManualClass && durationSeconds < 240) {
     const minutes = Math.floor(durationSeconds / 60);
     const seconds = durationSeconds % 60;
     const durationStr = `${minutes}min${seconds.toString().padStart(2, '0')}s`;
@@ -120,7 +109,6 @@ sessionsRouter.post('/', async (req, res) => {
     });
   }
 
-  // Se chegou aqui → ou não é manual, ou tem ≥ 4 minutos → prossegue normal
   console.log(`[SESSION] Aula válida - duração: ${Math.floor(durationSeconds / 60)}min${durationSeconds % 60}s`);
 
   const client = await pool.connect();
@@ -182,7 +170,6 @@ sessionsRouter.post('/', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // Envia e-mails em background (não trava a resposta HTTP para o frontend)
     const { sendSummaryEmailsAfterClass } = require('./jobs/send-class-summary-email');
     sendSummaryEmailsAfterClass(sessionId)
       .catch(err => {
@@ -199,7 +186,6 @@ sessionsRouter.post('/', async (req, res) => {
   }
 });
 
-// GET /api/sessions - Lista sessões com filtros
 sessionsRouter.get('/', async (req, res) => {
   const { start_date, end_date, participant_id, limit = 50 } = req.query;
 
@@ -253,7 +239,6 @@ sessionsRouter.get('/', async (req, res) => {
   }
 });
 
-// GET /api/sessions/:id - Detalhes completos de uma sessão
 sessionsRouter.get('/:id', async (req, res) => {
   const sessionId = req.params.id;
 
@@ -271,7 +256,7 @@ sessionsRouter.get('/:id', async (req, res) => {
 
     const participantsRes = await pool.query(`
       SELECT 
-        p.id, p.name,
+        p.id, p.name, p.photo, p.preferred_layout,
         sp.calories_total, sp.queima_points, sp.vo2_time_seconds,
         sp.min_red, sp.avg_hr, sp.max_hr_reached, sp.trimp_total,
         sp.epoc_estimated, sp.real_resting_hr
@@ -280,9 +265,15 @@ sessionsRouter.get('/:id', async (req, res) => {
       WHERE sp.session_id = $1
     `, [sessionId]);
 
+    const participants = participantsRes.rows.map(row => {
+      row.photo_base64 = row.photo ? row.photo.toString('base64') : null;
+      delete row.photo;
+      return row;
+    });
+
     res.json({
       session: sessionRes.rows[0],
-      participants: participantsRes.rows
+      participants
     });
   } catch (err) {
     console.error('Erro ao buscar detalhes da sessão:', err.stack);
@@ -290,7 +281,6 @@ sessionsRouter.get('/:id', async (req, res) => {
   }
 });
 
-// Ranking semanal
 sessionsRouter.get('/ranking-semanal', async (req, res) => {
   const { gender, metric = 'queima_points', limit = 10 } = req.query;
 
@@ -304,7 +294,7 @@ sessionsRouter.get('/ranking-semanal', async (req, res) => {
 
   let queryText = `
     SELECT 
-      p.id, p.name, p.gender,
+      p.id, p.name, p.gender, p.photo, p.preferred_layout,
       SUM(sp.queima_points) AS total_queima_points,
       SUM(sp.calories_total) AS total_calorias,
       SUM(sp.vo2_time_seconds) AS total_vo2_seconds,
@@ -331,7 +321,7 @@ sessionsRouter.get('/ranking-semanal', async (req, res) => {
   else orderBy = 'total_queima_points';
 
   queryText += `
-    GROUP BY p.id, p.name, p.gender
+    GROUP BY p.id, p.name, p.gender, p.photo, p.preferred_layout
     ORDER BY ${orderBy} DESC
     LIMIT $${params.length + 1}
   `;
@@ -339,9 +329,16 @@ sessionsRouter.get('/ranking-semanal', async (req, res) => {
 
   try {
     const result = await pool.query(queryText, params);
+
+    const rankings = result.rows.map(row => {
+      row.photo_base64 = row.photo ? row.photo.toString('base64') : null;
+      delete row.photo;
+      return row;
+    });
+
     res.json({
       week_start: mondayStr,
-      rankings: result.rows
+      rankings
     });
   } catch (err) {
     console.error('Erro no ranking semanal:', err.stack);
@@ -349,7 +346,23 @@ sessionsRouter.get('/ranking-semanal', async (req, res) => {
   }
 });
 
-// Ranking acumulado por aluno
+app.delete('/api/sessions/:id', async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM session_participants WHERE session_id = $1', [id]);
+    await client.query('DELETE FROM sessions WHERE id = $1', [id]);
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Erro ao excluir' });
+  } finally {
+    client.release();
+  }
+});
+
 app.get('/api/participants/ranking-acumulado', async (req, res) => {
   const { alunoId, inicio, fim } = req.query;
 
@@ -404,7 +417,6 @@ app.get('/api/participants/ranking-acumulado', async (req, res) => {
   }
 });
 
-// Histórico detalhado por aula
 app.get('/api/sessions/historico', async (req, res) => {
   const { alunoId, inicio, fim } = req.query;
 
@@ -464,7 +476,56 @@ app.get('/api/sessions/historico', async (req, res) => {
   }
 });
 
-// ROTA DE TESTE PARA GEMINI (com logs extras para debug)
+app.get('/api/sessions', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id, class_name, date_start, date_end, duration_minutes,
+        (SELECT COUNT(*) FROM session_participants WHERE session_id = s.id) as participant_count
+      FROM sessions s
+      ORDER BY date_start DESC
+      LIMIT 100
+    `);
+    res.json({ sessions: result.rows });
+  } catch (err) {
+    console.error('Erro ao listar sessões:', err);
+    res.status(500).json({ error: 'Erro ao listar sessões' });
+  }
+});
+
+app.get('/api/sessions/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const sessionRes = await pool.query('SELECT * FROM sessions WHERE id = $1', [id]);
+    if (sessionRes.rowCount === 0) return res.status(404).json({ error: 'Sessão não encontrada' });
+
+    const participantsRes = await pool.query(`
+      SELECT 
+        p.id, p.name, p.age, p.weight, p.height_cm, p.gender, p.photo, p.preferred_layout,
+        sp.*
+      FROM session_participants sp
+      JOIN participants p ON p.id = sp.participant_id
+      WHERE sp.session_id = $1
+    `, [id]);
+
+    const participants = participantsRes.rows.map(row => {
+      row.photo_base64 = row.photo ? row.photo.toString('base64') : null;
+      delete row.photo;
+      return row;
+    });
+
+    res.json({
+      session: sessionRes.rows[0],
+      participants
+    });
+  } catch (err) {
+    console.error('Erro detalhes sessão:', err);
+    res.status(500).json({ error: 'Erro ao buscar detalhes da sessão' });
+  }
+});
+
+app.use('/api/sessions', sessionsRouter);
+
 app.get('/test-gemini', async (req, res) => {
   console.log('[TEST-GEMINI] Rota acessada - iniciando teste');
 
@@ -476,7 +537,7 @@ app.get('/test-gemini', async (req, res) => {
     console.log('[TEST-GEMINI] Chave encontrada (não mostro o valor por segurança)');
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 segundos de timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     console.log('[TEST-GEMINI] Preparando request para Gemini API...');
 
@@ -534,7 +595,6 @@ app.get('/test-gemini', async (req, res) => {
   }
 });
 
-// NOVA ROTA PARA LISTAR MODELOS DISPONÍVEIS DO GEMINI
 app.get('/test-gemini-models', async (req, res) => {
   console.log('[TEST-GEMINI-MODELS] Rota acessada - listando modelos disponíveis');
 
@@ -575,120 +635,6 @@ app.get('/test-gemini-models', async (req, res) => {
   }
 });
 
-app.delete('/api/sessions/:id', async (req, res) => {
-  const { id } = req.params;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('DELETE FROM session_participants WHERE session_id = $1', [id]);
-    await client.query('DELETE FROM sessions WHERE id = $1', [id]);
-    await client.query('COMMIT');
-    res.json({ success: true });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    res.status(500).json({ error: 'Erro ao excluir' });
-  } finally {
-    client.release();
-  }
-});
-
-// ── ROTA PARA DETALHES DE UM ALUNO (para edição) ────────────────────────────────
-app.get('/api/participants/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query('SELECT * FROM participants WHERE id = $1', [id]);
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Aluno não encontrado' });
-    }
-    res.json({ participant: result.rows[0] });
-  } catch (err) {
-    console.error('Erro ao buscar aluno:', err);
-    res.status(500).json({ error: 'Erro ao buscar aluno' });
-  }
-});
-
-// ── ROTA PARA EDITAR ALUNO (PUT) ────────────────────────────────────────────────
-app.put('/api/participants/:id', async (req, res) => {
-  const { id } = req.params;
-  const {
-    name, age, weight, height_cm, gender, email, use_tanaka,
-    max_hr, historical_max_hr, device_id, device_name
-  } = req.body;
-
-  try {
-    const result = await pool.query(
-      `UPDATE participants 
-       SET name = $1, age = $2, weight = $3, height_cm = $4, gender = $5, 
-           email = $6, use_tanaka = $7, max_hr = $8, historical_max_hr = $9,
-           device_id = $10, device_name = $11
-       WHERE id = $12
-       RETURNING *`,
-      [name, age, weight, height_cm, gender, email, use_tanaka, max_hr, historical_max_hr, device_id, device_name, id]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Aluno não encontrado' });
-    }
-
-    res.json({ participant: result.rows[0] });
-  } catch (err) {
-    console.error('Erro ao editar aluno:', err);
-    res.status(500).json({ error: 'Erro ao editar aluno' });
-  }
-});
-
-// ── ROTA PARA LISTAR TODAS SESSÕES (simples, sem filtro pesado) ─────────────────
-app.get('/api/sessions', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        id, class_name, date_start, date_end, duration_minutes,
-        (SELECT COUNT(*) FROM session_participants WHERE session_id = s.id) as participant_count
-      FROM sessions s
-      ORDER BY date_start DESC
-      LIMIT 100
-    `);
-    res.json({ sessions: result.rows });
-  } catch (err) {
-    console.error('Erro ao listar sessões:', err);
-    res.status(500).json({ error: 'Erro ao listar sessões' });
-  }
-});
-
-// ── DETALHES DE UMA SESSÃO ────────────────────────────────
-app.get('/api/sessions/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const sessionRes = await pool.query('SELECT * FROM sessions WHERE id = $1', [id]);
-    if (sessionRes.rowCount === 0) return res.status(404).json({ error: 'Sessão não encontrada' });
-
-    const participantsRes = await pool.query(`
-      SELECT 
-        p.id, p.name, p.age, p.weight, p.height_cm, p.gender,
-        sp.*
-      FROM session_participants sp
-      JOIN participants p ON p.id = sp.participant_id
-      WHERE sp.session_id = $1
-    `, [id]);
-
-    res.json({
-      session: sessionRes.rows[0],
-      participants: participantsRes.rows
-    });
-  } catch (err) {
-    console.error('Erro detalhes sessão:', err);
-    res.status(500).json({ error: 'Erro ao buscar detalhes da sessão' });
-  }
-});
-
-// Monta o router de sessions
-app.use('/api/sessions', sessionsRouter);
-
-// ────────────────────────────────────────────────────────────────
-// ROTAS DE TESTE PARA GEMINI (apenas as que funcionam)
-// ────────────────────────────────────────────────────────────────
-
-// Teste com gemini-2.5-flash-lite (principal - funcionando)
 app.get('/test-gemini-lite', async (req, res) => {
   console.log('[TEST-GEMINI-LITE] Rota acessada - testando gemini-2.5-flash-lite');
 
@@ -698,7 +644,7 @@ app.get('/test-gemini-lite', async (req, res) => {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -745,7 +691,6 @@ app.get('/test-gemini-lite', async (req, res) => {
   }
 });
 
-// Rota de teste REALISTA do prompt do e-mail (simula send-class-summary-email.js)
 app.get('/test-gemini-email-prompt', async (req, res) => {
   console.log('[TEST-GEMINI-EMAIL] Rota acessada - simulando prompt completo do e-mail');
 
@@ -877,7 +822,6 @@ Data da aula de hoje: ${classDate}`
   }
 });
 
-// Inicia o servidor
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);
 });

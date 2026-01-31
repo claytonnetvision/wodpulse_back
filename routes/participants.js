@@ -7,21 +7,27 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// GET - Lista alunos do box (sem autenticação por enquanto)
+// GET - Lista todos os alunos (retorna photo_base64)
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, name, name_lower, age, weight, height_cm, gender, resting_hr, email,
-              use_tanaka, max_hr, historical_max_hr, device_id, device_name,
+              use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout,
               created_at, updated_at
        FROM participants
        ORDER BY name ASC`
     );
 
+    const participants = result.rows.map(row => {
+      row.photo_base64 = row.photo ? row.photo.toString('base64') : null;
+      delete row.photo;
+      return row;
+    });
+
     res.json({
       success: true,
-      count: result.rows.length,
-      participants: result.rows
+      count: participants.length,
+      participants
     });
   } catch (err) {
     console.error('Erro ao listar participantes:', err);
@@ -29,22 +35,24 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST - Cadastra novo aluno (sem autenticação)
+// POST - Cadastra novo aluno
 router.post('/', async (req, res) => {
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
     use_tanaka = false, max_hr, historical_max_hr = 0,
-    device_id, device_name
+    device_id, device_name, photo, preferred_layout = 'performance'
   } = req.body;
 
   if (!name || !max_hr) {
     return res.status(400).json({ error: 'Nome e max_hr são obrigatórios' });
   }
 
+  const photoBuffer = photo ? Buffer.from(photo, 'base64') : null;
+
   try {
     const nameLower = name.trim().toLowerCase();
 
-    // Verifica duplicata (sem box_id por enquanto, já que removemos autenticação)
+    // Verifica duplicata
     const existing = await pool.query(
       'SELECT id FROM participants WHERE name_lower = $1',
       [nameLower]
@@ -56,13 +64,15 @@ router.post('/', async (req, res) => {
     const result = await pool.query(
       `INSERT INTO participants (
         box_id, name, name_lower, age, weight, height_cm, gender, resting_hr, email,
-        use_tanaka, max_hr, historical_max_hr, device_id, device_name,
+        use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout,
         created_at, updated_at
-      ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+      ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
       RETURNING id, name, created_at`,
       [
         name, nameLower, age, weight, height_cm, gender, resting_hr, email,
-        use_tanaka, max_hr, historical_max_hr, device_id || null, device_name || null
+        use_tanaka, max_hr, historical_max_hr,
+        device_id || null, device_name || null,
+        photoBuffer, preferred_layout
       ]
     );
 
@@ -77,13 +87,15 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT - Edita aluno (sem autenticação)
+// PUT - Edita aluno (photo só é sobrescrito se enviado)
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
-    use_tanaka, max_hr, historical_max_hr, device_id, device_name
+    use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout
   } = req.body;
+
+  const photoBuffer = photo !== undefined ? (photo ? Buffer.from(photo, 'base64') : null) : undefined;
 
   try {
     const nameLower = name ? name.trim().toLowerCase() : undefined;
@@ -103,21 +115,28 @@ router.put('/:id', async (req, res) => {
         historical_max_hr = COALESCE($11, historical_max_hr),
         device_id = COALESCE($12, device_id),
         device_name = COALESCE($13, device_name),
+        photo = COALESCE($14, photo),
+        preferred_layout = COALESCE($15, preferred_layout),
         updated_at = NOW()
-      WHERE id = $14
-      RETURNING id, name, email, device_id, device_name`,
+      WHERE id = $16
+      RETURNING id, name, email, device_id, device_name, photo, preferred_layout`,
       [
-        name || null, nameLower || null, age, weight, height_cm, gender, resting_hr, email, use_tanaka, max_hr, historical_max_hr,
-        device_id, device_name, id
+        name || null, nameLower || null, age, weight, height_cm, gender, resting_hr, email,
+        use_tanaka, max_hr, historical_max_hr, device_id, device_name,
+        photoBuffer, preferred_layout || null, id
       ]
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Aluno não encontrado' });
 
+    const participant = result.rows[0];
+    participant.photo_base64 = participant.photo ? participant.photo.toString('base64') : null;
+    delete participant.photo;
+
     res.json({
       success: true,
       message: 'Aluno atualizado',
-      participant: result.rows[0]
+      participant
     });
   } catch (err) {
     console.error('Erro ao editar:', err);
@@ -125,7 +144,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE - Exclui aluno (sem autenticação)
+// DELETE - Exclui aluno
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
