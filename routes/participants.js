@@ -1,3 +1,4 @@
+// routes/participants.js - Rota para CRUD de participantes (com suporte completo a foto BYTEA + compatibilidade com frontend)
 const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
@@ -7,7 +8,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// GET - Lista todos os alunos (retorna photo_base64)
+// GET - Lista todos os alunos (retorna photo como base64 string)
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
@@ -19,8 +20,7 @@ router.get('/', async (req, res) => {
     );
 
     const participants = result.rows.map(row => {
-      row.photo_base64 = row.photo ? row.photo.toString('base64') : null;
-      delete row.photo;
+      row.photo = row.photo ? row.photo.toString('base64') : null; // retorna como "photo" base64 (compatível com frontend)
       return row;
     });
 
@@ -35,7 +35,36 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST - Cadastra novo aluno
+// GET individual (opcional, mas útil - não tinha no seu original, adicionei para completude)
+router.get('/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT id, name, name_lower, age, weight, height_cm, gender, resting_hr, email,
+              use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout,
+              created_at, updated_at
+       FROM participants WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Aluno não encontrado' });
+    }
+
+    const participant = result.rows[0];
+    participant.photo = participant.photo ? participant.photo.toString('base64') : null;
+
+    res.json({
+      success: true,
+      participant
+    });
+  } catch (err) {
+    console.error('Erro ao buscar participante:', err);
+    res.status(500).json({ error: 'Erro ao buscar aluno' });
+  }
+});
+
+// POST - Cadastra novo aluno (com foto opcional)
 router.post('/', async (req, res) => {
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
@@ -47,7 +76,14 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Nome e max_hr são obrigatórios' });
   }
 
-  const photoBuffer = photo ? Buffer.from(photo, 'base64') : null;
+  let photoBuffer = null;
+  if (photo) {
+    try {
+      photoBuffer = Buffer.from(photo, 'base64');
+    } catch (err) {
+      return res.status(400).json({ error: 'Foto em formato base64 inválido' });
+    }
+  }
 
   try {
     const nameLower = name.trim().toLowerCase();
@@ -67,7 +103,7 @@ router.post('/', async (req, res) => {
         use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout,
         created_at, updated_at
       ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
-      RETURNING id, name, created_at`,
+      RETURNING *`, // RETURNING * para pegar todos os campos, incluindo photo
       [
         name, nameLower, age, weight, height_cm, gender, resting_hr, email,
         use_tanaka, max_hr, historical_max_hr,
@@ -76,10 +112,13 @@ router.post('/', async (req, res) => {
       ]
     );
 
+    const newParticipant = result.rows[0];
+    newParticipant.photo = newParticipant.photo ? newParticipant.photo.toString('base64') : null; // retorna como base64
+
     res.status(201).json({
       success: true,
       message: 'Aluno criado',
-      participant: result.rows[0]
+      participant: newParticipant
     });
   } catch (err) {
     console.error('Erro ao criar participante:', err);
@@ -95,48 +134,117 @@ router.put('/:id', async (req, res) => {
     use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout
   } = req.body;
 
-  const photoBuffer = photo !== undefined ? (photo ? Buffer.from(photo, 'base64') : null) : undefined;
+  let photoBuffer = undefined;
+  if (photo !== undefined) {
+    if (photo === null) {
+      photoBuffer = null;
+    } else {
+      try {
+        photoBuffer = Buffer.from(photo, 'base64');
+      } catch (err) {
+        return res.status(400).json({ error: 'Foto em formato base64 inválido' });
+      }
+    }
+  }
 
   try {
     const nameLower = name ? name.trim().toLowerCase() : undefined;
 
-    const result = await pool.query(
-      `UPDATE participants SET
-        name = COALESCE($1, name),
-        name_lower = COALESCE($2, name_lower),
-        age = COALESCE($3, age),
-        weight = COALESCE($4, weight),
-        height_cm = COALESCE($5, height_cm),
-        gender = COALESCE($6, gender),
-        resting_hr = COALESCE($7, resting_hr),
-        email = COALESCE($8, email),
-        use_tanaka = COALESCE($9, use_tanaka),
-        max_hr = COALESCE($10, max_hr),
-        historical_max_hr = COALESCE($11, historical_max_hr),
-        device_id = COALESCE($12, device_id),
-        device_name = COALESCE($13, device_name),
-        photo = COALESCE($14, photo),
-        preferred_layout = COALESCE($15, preferred_layout),
-        updated_at = NOW()
-      WHERE id = $16
-      RETURNING id, name, email, device_id, device_name, photo, preferred_layout`,
-      [
-        name || null, nameLower || null, age, weight, height_cm, gender, resting_hr, email,
-        use_tanaka, max_hr, historical_max_hr, device_id, device_name,
-        photoBuffer, preferred_layout || null, id
-      ]
-    );
+    let query = 'UPDATE participants SET updated_at = NOW()';
+    const values = [];
+    let paramIndex = 1;
 
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Aluno não encontrado' });
+    if (name !== undefined) {
+      query += `, name = $${paramIndex}, name_lower = $${paramIndex + 1}`;
+      values.push(name, nameLower);
+      paramIndex += 2;
+    }
+    if (age !== undefined) {
+      query += `, age = $${paramIndex}`;
+      values.push(age);
+      paramIndex++;
+    }
+    if (weight !== undefined) {
+      query += `, weight = $${paramIndex}`;
+      values.push(weight);
+      paramIndex++;
+    }
+    if (height_cm !== undefined) {
+      query += `, height_cm = $${paramIndex}`;
+      values.push(height_cm);
+      paramIndex++;
+    }
+    if (gender !== undefined) {
+      query += `, gender = $${paramIndex}`;
+      values.push(gender);
+      paramIndex++;
+    }
+    if (resting_hr !== undefined) {
+      query += `, resting_hr = $${paramIndex}`;
+      values.push(resting_hr);
+      paramIndex++;
+    }
+    if (email !== undefined) {
+      query += `, email = $${paramIndex}`;
+      values.push(email);
+      paramIndex++;
+    }
+    if (use_tanaka !== undefined) {
+      query += `, use_tanaka = $${paramIndex}`;
+      values.push(use_tanaka);
+      paramIndex++;
+    }
+    if (max_hr !== undefined) {
+      query += `, max_hr = $${paramIndex}`;
+      values.push(max_hr);
+      paramIndex++;
+    }
+    if (historical_max_hr !== undefined) {
+      query += `, historical_max_hr = $${paramIndex}`;
+      values.push(historical_max_hr);
+      paramIndex++;
+    }
+    if (device_id !== undefined) {
+      query += `, device_id = $${paramIndex}`;
+      values.push(device_id);
+      paramIndex++;
+    }
+    if (device_name !== undefined) {
+      query += `, device_name = $${paramIndex}`;
+      values.push(device_name);
+      paramIndex++;
+    }
+    if (photoBuffer !== undefined) {
+      query += `, photo = $${paramIndex}`;
+      values.push(photoBuffer);
+      paramIndex++;
+    }
+    if (preferred_layout !== undefined) {
+      query += `, preferred_layout = $${paramIndex}`;
+      values.push(preferred_layout);
+      paramIndex++;
+    }
 
-    const participant = result.rows[0];
-    participant.photo_base64 = participant.photo ? participant.photo.toString('base64') : null;
-    delete participant.photo;
+    if (values.length === 0) {
+      return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    }
+
+    query += ` WHERE id = $${paramIndex} RETURNING *`;
+    values.push(id);
+
+    const result = await pool.query(query, values);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Aluno não encontrado' });
+    }
+
+    const updatedParticipant = result.rows[0];
+    updatedParticipant.photo = updatedParticipant.photo ? updatedParticipant.photo.toString('base64') : null;
 
     res.json({
       success: true,
       message: 'Aluno atualizado',
-      participant
+      participant: updatedParticipant
     });
   } catch (err) {
     console.error('Erro ao editar:', err);
@@ -149,7 +257,10 @@ router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    await pool.query('DELETE FROM participants WHERE id = $1', [id]);
+    const result = await pool.query('DELETE FROM participants WHERE id = $1 RETURNING id', [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Aluno não encontrado' });
+    }
 
     res.json({ success: true, message: 'Aluno excluído com sucesso' });
   } catch (err) {
