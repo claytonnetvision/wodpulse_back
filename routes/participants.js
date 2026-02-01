@@ -1,4 +1,4 @@
-// routes/participants.js - Rota para CRUD de participantes (agora photo como TEXT base64 string)
+// routes/participants.js - Rota para CRUD de participantes (photo como TEXT base64 string)
 const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
@@ -8,7 +8,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// GET - Lista todos os alunos (photo já é base64 string)
+// GET - Lista todos os alunos
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
@@ -64,7 +64,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST - Cadastra novo aluno (photo já vem como base64 string)
+// POST - Cadastra novo aluno
 router.post('/', async (req, res) => {
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
@@ -117,7 +117,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT - Edita aluno (photo como string base64 ou null)
+// PUT - Edita aluno
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const {
@@ -194,7 +194,7 @@ router.put('/:id', async (req, res) => {
     }
     if (photo !== undefined) {
       query += `, photo = $${paramIndex}`;
-      values.push(photo); // agora salva string base64 diretamente
+      values.push(photo); // salva string base64 diretamente
       paramIndex++;
     }
     if (preferred_layout !== undefined) {
