@@ -266,7 +266,7 @@ sessionsRouter.get('/:id', async (req, res) => {
     `, [sessionId]);
 
     const participants = participantsRes.rows.map(row => {
-      row.photo_base64 = row.photo ? row.photo.toString('base64') : null;
+      row.photo_base64 = row.photo || null; // agora photo é TEXT (string base64)
       delete row.photo;
       return row;
     });
@@ -331,7 +331,7 @@ sessionsRouter.get('/ranking-semanal', async (req, res) => {
     const result = await pool.query(queryText, params);
 
     const rankings = result.rows.map(row => {
-      row.photo_base64 = row.photo ? row.photo.toString('base64') : null;
+      row.photo_base64 = row.photo || null; // agora photo é TEXT (string base64)
       delete row.photo;
       return row;
     });
@@ -509,7 +509,7 @@ app.get('/api/sessions/:id', async (req, res) => {
     `, [id]);
 
     const participants = participantsRes.rows.map(row => {
-      row.photo_base64 = row.photo ? row.photo.toString('base64') : null;
+      row.photo_base64 = row.photo || null; // agora photo é TEXT (string base64)
       delete row.photo;
       return row;
     });
