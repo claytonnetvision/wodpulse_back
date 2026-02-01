@@ -19,10 +19,10 @@ router.get('/', async (req, res) => {
        ORDER BY name ASC`
     );
 
-    const participants = result.rows.map(row => {
-      row.photo = row.photo ? row.photo.toString('base64') : null; // retorna como "photo" base64 (compatível com frontend)
-      return row;
-    });
+    const participants = result.rows.map(row => ({
+      ...row,
+      photo: row.photo ? row.photo.toString('base64') : null  // padronizado
+    }));
 
     res.json({
       success: true,
@@ -35,7 +35,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET individual (opcional, mas útil - não tinha no seu original, adicionei para completude)
+// GET individual
 router.get('/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -80,6 +80,7 @@ router.post('/', async (req, res) => {
   if (photo) {
     try {
       photoBuffer = Buffer.from(photo, 'base64');
+      console.log(`[FOTO] Salvando foto para novo aluno ${name} (tamanho: ${photoBuffer.length} bytes)`);
     } catch (err) {
       return res.status(400).json({ error: 'Foto em formato base64 inválido' });
     }
@@ -103,7 +104,7 @@ router.post('/', async (req, res) => {
         use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout,
         created_at, updated_at
       ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
-      RETURNING *`, // RETURNING * para pegar todos os campos, incluindo photo
+      RETURNING *`,
       [
         name, nameLower, age, weight, height_cm, gender, resting_hr, email,
         use_tanaka, max_hr, historical_max_hr,
@@ -113,7 +114,7 @@ router.post('/', async (req, res) => {
     );
 
     const newParticipant = result.rows[0];
-    newParticipant.photo = newParticipant.photo ? newParticipant.photo.toString('base64') : null; // retorna como base64
+    newParticipant.photo = newParticipant.photo ? newParticipant.photo.toString('base64') : null;
 
     res.status(201).json({
       success: true,
@@ -138,9 +139,11 @@ router.put('/:id', async (req, res) => {
   if (photo !== undefined) {
     if (photo === null) {
       photoBuffer = null;
+      console.log(`[FOTO] Removendo foto do aluno ID ${id}`);
     } else {
       try {
         photoBuffer = Buffer.from(photo, 'base64');
+        console.log(`[FOTO] Atualizando foto do aluno ID ${id} (tamanho: ${photoBuffer.length} bytes)`);
       } catch (err) {
         return res.status(400).json({ error: 'Foto em formato base64 inválido' });
       }
