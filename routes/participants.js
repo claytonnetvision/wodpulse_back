@@ -1,4 +1,4 @@
-// routes/participants.js - Rota para CRUD de participantes (com suporte completo a foto BYTEA + compatibilidade com frontend)
+// routes/participants.js - Rota para CRUD de participantes (agora photo como TEXT base64 string)
 const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
@@ -8,7 +8,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// GET - Lista todos os alunos (retorna photo como base64 string)
+// GET - Lista todos os alunos (photo já é base64 string)
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
 
     const participants = result.rows.map(row => ({
       ...row,
-      photo: row.photo ? row.photo.toString('base64') : null  // padronizado
+      photo: row.photo || null  // já é string base64 ou null
     }));
 
     res.json({
@@ -52,7 +52,7 @@ router.get('/:id', async (req, res) => {
     }
 
     const participant = result.rows[0];
-    participant.photo = participant.photo ? participant.photo.toString('base64') : null;
+    participant.photo = participant.photo || null;
 
     res.json({
       success: true,
@@ -64,7 +64,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST - Cadastra novo aluno (com foto opcional)
+// POST - Cadastra novo aluno (photo já vem como base64 string)
 router.post('/', async (req, res) => {
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
@@ -74,16 +74,6 @@ router.post('/', async (req, res) => {
 
   if (!name || !max_hr) {
     return res.status(400).json({ error: 'Nome e max_hr são obrigatórios' });
-  }
-
-  let photoBuffer = null;
-  if (photo) {
-    try {
-      photoBuffer = Buffer.from(photo, 'base64');
-      console.log(`[FOTO] Salvando foto para novo aluno ${name} (tamanho: ${photoBuffer.length} bytes)`);
-    } catch (err) {
-      return res.status(400).json({ error: 'Foto em formato base64 inválido' });
-    }
   }
 
   try {
@@ -109,12 +99,12 @@ router.post('/', async (req, res) => {
         name, nameLower, age, weight, height_cm, gender, resting_hr, email,
         use_tanaka, max_hr, historical_max_hr,
         device_id || null, device_name || null,
-        photoBuffer, preferred_layout
+        photo || null, preferred_layout
       ]
     );
 
     const newParticipant = result.rows[0];
-    newParticipant.photo = newParticipant.photo ? newParticipant.photo.toString('base64') : null;
+    newParticipant.photo = newParticipant.photo || null;
 
     res.status(201).json({
       success: true,
@@ -127,28 +117,13 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT - Edita aluno (photo só é sobrescrito se enviado)
+// PUT - Edita aluno (photo como string base64 ou null)
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const {
     name, age, weight, height_cm, gender, resting_hr, email,
     use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout
   } = req.body;
-
-  let photoBuffer = undefined;
-  if (photo !== undefined) {
-    if (photo === null) {
-      photoBuffer = null;
-      console.log(`[FOTO] Removendo foto do aluno ID ${id}`);
-    } else {
-      try {
-        photoBuffer = Buffer.from(photo, 'base64');
-        console.log(`[FOTO] Atualizando foto do aluno ID ${id} (tamanho: ${photoBuffer.length} bytes)`);
-      } catch (err) {
-        return res.status(400).json({ error: 'Foto em formato base64 inválido' });
-      }
-    }
-  }
 
   try {
     const nameLower = name ? name.trim().toLowerCase() : undefined;
@@ -217,9 +192,9 @@ router.put('/:id', async (req, res) => {
       values.push(device_name);
       paramIndex++;
     }
-    if (photoBuffer !== undefined) {
+    if (photo !== undefined) {
       query += `, photo = $${paramIndex}`;
-      values.push(photoBuffer);
+      values.push(photo); // agora salva string base64 diretamente
       paramIndex++;
     }
     if (preferred_layout !== undefined) {
@@ -242,7 +217,7 @@ router.put('/:id', async (req, res) => {
     }
 
     const updatedParticipant = result.rows[0];
-    updatedParticipant.photo = updatedParticipant.photo ? updatedParticipant.photo.toString('base64') : null;
+    updatedParticipant.photo = updatedParticipant.photo || null;
 
     res.json({
       success: true,
