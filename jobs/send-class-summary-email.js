@@ -480,7 +480,7 @@ Data da aula de hoje: ${classDate}`;
 
       <!-- === AJUSTE 2: BOTÃO PARA PÁGINA DE PROGRESSO === -->
       <div style="text-align: center; margin: 30px 0;">
-        <a href="https://wodpulse-front-f2lo92fpz-robson-claytons-projects.vercel.app/meu-progresso.html?id=${aluno.id}" 
+<a href="https://www.infrapower.com.br/meu-progresso.html?id=${aluno.id}"
            style="background: #FF9800; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-size: 18px; font-weight: bold; display: inline-block;">
           📊 Ver meu progresso completo
         </a>
