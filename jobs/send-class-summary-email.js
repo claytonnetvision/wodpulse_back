@@ -8,7 +8,7 @@ const pool = new Pool({
 });
 
 // Configuração do transporter (lê do .env)
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'ns1234.hostgator.com',
   port: Number(process.env.EMAIL_PORT) || 465,
   secure: process.env.EMAIL_SECURE === 'true' || true,
