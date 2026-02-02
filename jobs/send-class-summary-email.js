@@ -171,7 +171,7 @@ async function sendSummaryEmailsAfterClass(sessionId) {
       let comentarioIA = 'Cada treino soma. Mantenha o foco e os números vão subir cada vez mais! 💪'; // fallback
       let iaUsada = 'fallback';
 
-      const promptText = `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e do treino anterior e gere um comentário técnico, motivacional e positivo de 6 a 9 linhas completas. Destaque a duração da aula (${aulaDuracaoMin} minutos) em relação à intensidade geral, tempo nas zonas 2, 3, 4 e 5, melhora ou piora no comparativo, recuperação e dê 1 ou 2 dicas práticas pro próximo treino. Use tom encorajador, linguagem simples e direta. Não corte o texto, escreva o comentário completo.
+      const promptText = `Você é um treinador experiente de CrossFit, corrida e esportes. Analise esses dados da aula de hoje e do treino anterior e gere um comentário técnico, motivacional e positivo de 6 a 9 linhas completas. Destaque a duração da aula (${aulaDuracaoMin} minutos) em relação à intensidade geral, tempo nas zonas 2, 3, 4 e 5, melhora ou piora no comparativo, recuperação e dê 1 ou 2 dicas práticas pro próximo treino. Use tom encorajador, linguagem simples e direta. Não corte o texto, escreva o comentário completo, no final faça uma brincadeira maldosa sobre o q pode acontecer se ele nao treinar.
 
 Dados de hoje:
 - Duração da aula: ${aulaDuracaoMin} minutos
