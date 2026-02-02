@@ -440,7 +440,8 @@ app.get('/api/sessions/historico', async (req, res) => {
       sp.min_zone2,
       sp.min_zone3,
       sp.min_zone4,
-      sp.min_zone5
+      sp.min_zone5,
+      sp.ia_comment
     FROM sessions s
     JOIN session_participants sp ON sp.session_id = s.id
     JOIN participants p ON p.id = sp.participant_id

@@ -8,7 +8,7 @@ const pool = new Pool({
 });
 
 // Configuração do transporter (lê do .env)
-const transporter = nodemailer.createTransport({
+const transporter = nodemailer.createTransporter({
   host: process.env.EMAIL_HOST || 'ns1234.hostgator.com',
   port: Number(process.env.EMAIL_PORT) || 465,
   secure: process.env.EMAIL_SECURE === 'true' || true,
@@ -282,6 +282,22 @@ Data da aula de hoje: ${classDate}`;
         }
       }
 
+      // === AJUSTE 1: SALVAR ia_comment NO BANCO SE GERADO COM SUCESSO ===
+      if (success) {
+        try {
+          await pool.query(
+            `UPDATE session_participants 
+             SET ia_comment = $1 
+             WHERE session_id = $2 AND participant_id = $3`,
+            [comentarioIA, sessionId, aluno.id]
+          );
+          console.log(`[IA_COMMENT] Salvo no banco para aluno ${aluno.name} - sessão ${sessionId}`);
+        } catch (err) {
+          console.error(`[IA_COMMENT] Erro ao salvar comentário para aluno ${aluno.name}:`, err.message);
+          // Não quebra o envio do email se falhar aqui
+        }
+      }
+
       if (!success) {
         console.warn(`[GEMINI FINAL] Todos os modelos/tentativas falharam para ${aluno.name} → usando fallback`);
       }
@@ -461,6 +477,17 @@ Data da aula de hoje: ${classDate}`;
         <strong>Comentário do treinador (com ajuda da IA - ${iaUsada}):</strong><br><br>
         ${comentarioIA}
       </div>
+
+      <!-- === AJUSTE 2: BOTÃO PARA PÁGINA DE PROGRESSO === -->
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="https://wodpulse-front-f2lo92fpz-robson-claytons-projects.vercel.app/meu-progresso.html?id=${aluno.id}" 
+           style="background: #FF9800; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-size: 18px; font-weight: bold; display: inline-block;">
+          📊 Ver meu progresso completo
+        </a>
+      </div>
+      <p style="text-align: center; margin-top: 10px; color: #555;">
+        Acesse seu histórico detalhado, gráficos de evolução e todos os comentários do treinador!
+      </p>
 
       <div class="metrics-info">
         <h4>Entenda suas zonas de treinamento</h4>
