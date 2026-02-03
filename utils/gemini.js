@@ -5,10 +5,13 @@ async function gerarAnaliseGemini(promptText, imagensBase64 = []) {
   let modelUsado = 'fallback';
 
   // Modelos que suportam visão (imagens) - use 1.5-flash primeiro (rápido e barato)
-  const modelsToTry = [
-    'gemini-1.5-flash',   // Principal - rápido, barato e com visão
-    'gemini-1.5-pro'      // Fallback mais poderoso
-  ];
+  // utils/gemini.js (parte alterada)
+
+const modelsToTry = [
+  'gemini-2.5-flash',         // Primeiro: o que já funciona perfeitamente no seu /test-gemini
+  'gemini-2.5-flash-lite',    // Segundo: o que você usa no e-mail (mais barato/rápido)
+  'gemini-1.5-pro'            // Terceiro: fallback com visão robusta (se sua chave tiver acesso)
+];
 
   let success = false;
 
