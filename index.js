@@ -5,6 +5,8 @@ const { Pool } = require('pg');
 
 const app = express();
 const port = process.env.PORT || 3001;
+const { gerarAnaliseGemini } = require('./utils/gemini'); // ajuste o caminho
+
 
 app.use(cors({
   origin: [
@@ -54,7 +56,61 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/participants', require('./routes/participants'));
 app.use('/api/body-progress', require('./routes/body-progress'));
 const sessionsRouter = express.Router();
+// Novo endpoint para análise de progresso corporal
+app.post('/api/ai-analyze-body-progress', async (req, res) => {
+  try {
+    const { aluno, antes, depois } = req.body;
 
+    if (!aluno || !antes || !depois) {
+      return res.status(400).json({ error: 'Dados incompletos' });
+    }
+
+    // Calcula diferenças para incluir no prompt
+    const pesoDiff = (depois.measures.peso || 0) - (antes.measures.peso || 0);
+    const cinturaDiff = (depois.measures['circ-cintura'] || 0) - (antes.measures['circ-cintura'] || 0);
+    const abdomenDiff = (depois.measures['circ-abdomen'] || 0) - (antes.measures['circ-abdomen'] || 0);
+
+    const dataAntes = new Date(antes.date).toLocaleDateString('pt-BR');
+    const dataDepois = new Date(depois.date).toLocaleDateString('pt-BR');
+
+    const prompt = `Você é um treinador físico experiente e técnico do WODPulse.
+
+Analise a evolução corporal do aluno ${aluno.name} (${aluno.age} anos, gênero ${aluno.gender === 'M' ? 'masculino' : 'feminino'}).
+
+Registro anterior: ${dataAntes}
+Registro atual: ${dataDepois}
+
+Principais mudanças medidas:
+- Peso: ${pesoDiff > 0 ? '+' : ''}${pesoDiff.toFixed(1)} kg
+- Cintura: ${cinturaDiff > 0 ? '+' : ''}${cinturaDiff.toFixed(1)} cm
+- Abdômen: ${abdomenDiff > 0 ? '+' : ''}${abdomenDiff.toFixed(1)} cm
+
+Você tem acesso às fotos de antes e depois (várias ângulos). Analise visualmente:
+- Mudanças na definição muscular
+- Redução/aumento de gordura (visceral e subcutânea)
+- Postura, simetria, volume muscular
+- Qualquer sinal de progresso ou estagnação
+
+Forneça um relatório técnico e motivacional em português, com:
+1. Resumo geral da evolução (recomposição, perda de gordura, ganho muscular etc.)
+2. Análise detalhada das medidas e dobras
+3. Análise visual das fotos (seja específico: "visível redução de gordura abdominal", "melhora na definição dos ombros" etc.)
+4. Recomendações práticas para os próximos 30-60 dias (treino, nutrição, recuperação)
+5. Tom positivo, encorajador e profissional
+
+Use Markdown leve (**negrito**, listas). Máximo 600 palavras.`;
+
+    // Junta todas as fotos (antes + depois) — até 16 imagens o Gemini aceita tranquilamente
+    const todasFotos = [...(antes.photos || []), ...(depois.photos || [])];
+
+    const { analysis, model } = await gerarAnaliseGemini(prompt, todasFotos);
+
+    res.json({ analysis, model });
+  } catch (err) {
+    console.error('[AI BODY PROGRESS ERROR]', err);
+    res.status(500).json({ error: 'Erro ao gerar análise' });
+  }
+});
 sessionsRouter.post('/', async (req, res) => {
   const { class_name, date_start, date_end, duration_minutes, box_id, participantsData } = req.body;
 
