@@ -1,11 +1,13 @@
 // utils/gemini.js
-async function gerarAnaliseGemini(promptText, imagensBase64 = []) {
-  let comentarioIA = 'Ótimo progresso! Continue assim que os resultados vão aparecer cada vez mais. 💪';
-  let iaUsada = 'fallback';
 
+async function gerarAnaliseGemini(promptText, imagensBase64 = []) {
+  let analysis = 'Ótimo progresso! Continue assim que os resultados vão aparecer cada vez mais. 💪';
+  let modelUsado = 'fallback';
+
+  // Modelos que suportam visão (imagens) - use 1.5-flash primeiro (rápido e barato)
   const modelsToTry = [
-    'gemini-1.5-flash',        // Suporta visão perfeitamente
-    'gemini-1.5-pro'           // Fallback mais poderoso (se precisar)
+    'gemini-1.5-flash',   // Principal - rápido, barato e com visão
+    'gemini-1.5-pro'      // Fallback mais poderoso
   ];
 
   let success = false;
@@ -18,19 +20,19 @@ async function gerarAnaliseGemini(promptText, imagensBase64 = []) {
 
     while (attempt < maxRetries && !success) {
       attempt++;
-      console.log(`[GEMINI BODY] Tentativa ${attempt}/${maxRetries} - Modelo: ${model}`);
+      console.log(`[GEMINI BODY PROGRESS] Tentativa ${attempt}/${maxRetries} - Modelo: ${model}`);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s (mais tempo por causa das imagens)
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutos (imagens demoram mais)
 
-      // Monta as parts: texto + imagens
+      // Monta o payload com texto + imagens em base64
       const contents = [
         {
           parts: [
             { text: promptText },
             ...imagensBase64.map(base64 => ({
               inlineData: {
-                mimeType: "image/jpeg",
+                mimeType: 'image/jpeg',
                 data: base64
               }
             }))
@@ -61,7 +63,7 @@ async function gerarAnaliseGemini(promptText, imagensBase64 = []) {
           const errorText = await response.text();
           console.error(`[GEMINI BODY ERRO] ${model} - HTTP ${response.status}: ${errorText}`);
           if (attempt < maxRetries) {
-            await new Promise(r => setTimeout(r, attempt * 30000));
+            await new Promise(r => setTimeout(r, attempt * 30000)); // espera crescente
           }
           continue;
         }
@@ -69,13 +71,18 @@ async function gerarAnaliseGemini(promptText, imagensBase64 = []) {
         const json = await response.json();
 
         if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
-          comentarioIA = json.candidates[0].content.parts[0].text.trim();
+          analysis = json.candidates[0].content.parts[0].text.trim();
           success = true;
-          iaUsada = model;
-          console.log(`[GEMINI BODY SUCESSO] ${model} - ${comentarioIA.length} chars`);
+          modelUsado = model;
+          console.log(`[GEMINI BODY SUCESSO] ${model} - ${analysis.length} caracteres gerados`);
+        } else {
+          console.warn(`[GEMINI BODY] Resposta sem texto válido (${model})`);
         }
       } catch (err) {
-        console.error(`[GEMINI BODY FALHA] ${model} - Tentativa ${attempt}: ${err.message}`);
+        console.error(`[GEMINI BODY FALHA] ${model} - Tentativa ${attempt}:`, err.message);
+        if (err.name === 'AbortError') {
+          console.error('[GEMINI BODY] Timeout de 2 minutos atingido');
+        }
         if (attempt < maxRetries) {
           await new Promise(r => setTimeout(r, attempt * 30000));
         }
@@ -83,7 +90,7 @@ async function gerarAnaliseGemini(promptText, imagensBase64 = []) {
     }
   }
 
-  return { analysis: comentarioIA, model: iaUsada };
+  return { analysis, model: modelUsado };
 }
 
 module.exports = { gerarAnaliseGemini };
