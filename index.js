@@ -52,7 +52,7 @@ app.get('/', (req, res) => {
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/participants', require('./routes/participants'));
-
+app.use('/api/body-progress', require('./routes/body-progress'));
 const sessionsRouter = express.Router();
 
 sessionsRouter.post('/', async (req, res) => {
