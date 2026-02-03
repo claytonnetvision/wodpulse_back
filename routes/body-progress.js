@@ -40,7 +40,34 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: 'Erro ao buscar progresso corporal' });
   }
 });
+// DELETE
+router.delete('/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query('DELETE FROM body_progress WHERE id = $1', [id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Entrada não encontrada' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao apagar' });
+  }
+});
 
+// PUT - Atualizar
+router.put('/:id', async (req, res) => {
+  const { id } = req.params;
+  const { date, measures = {}, photos = [] } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE body_progress SET date = $1, measures = $2, photos = $3 WHERE id = $4 RETURNING id`,
+      [date, measures, photos, id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Entrada não encontrada' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao atualizar' });
+  }
+});
 // POST - Salva nova entrada de progresso
 router.post('/', async (req, res) => {
   const { alunoId, date, measures = {}, photos = [] } = req.body;
