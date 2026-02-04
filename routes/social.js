@@ -174,4 +174,110 @@ router.get('/mutual-matches', validateDBSession, async (req, res) => {
   }
 });
 
+router.delete("/challenge/:id", validateDBSession, async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.participant_id;
+
+  try {
+    // Verifica se o usuário logado é o criador do desafio
+    const challengeRes = await pool.query(
+      "SELECT creator_id FROM social_challenges WHERE id = $1",
+      [id]
+    );
+
+    if (challengeRes.rows.length === 0) {
+      return res.status(404).json({ error: "Desafio não encontrado" });
+    }
+
+    if (challengeRes.rows[0].creator_id !== userId) {
+      return res.status(403).json({ error: "Você não tem permissão para excluir este desafio" });
+    }
+
+    await pool.query("DELETE FROM social_challenges WHERE id = $1", [id]);
+    res.json({ success: true, message: "Desafio excluído com sucesso" });
+  } catch (err) {
+    console.error("Erro ao excluir desafio:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/challenge/:id/result", validateDBSession, async (req, res) => {
+  const { id: challengeId } = req.params;
+  const userId = req.user.participant_id;
+  const { result_value } = req.body; // Ex: tempo em segundos, peso em kg, repetições
+
+  if (result_value === undefined || result_value === null) {
+    return res.status(400).json({ error: "Valor do resultado é obrigatório." });
+  }
+
+  try {
+    // Verificar se o participante está no desafio
+    const participantInChallenge = await pool.query(
+      `SELECT id FROM social_challenges
+       WHERE id = $1 AND (creator_id = $2 OR opponent_id = $2)`,
+      [challengeId, userId]
+    );
+
+    if (participantInChallenge.rows.length === 0) {
+      return res.status(403).json({ error: "Você não faz parte deste desafio." });
+    }
+
+    // Inserir ou atualizar o resultado
+    await pool.query(
+      `INSERT INTO social_challenge_results (challenge_id, participant_id, result_value, recorded_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (challenge_id, participant_id) DO UPDATE SET result_value = $3, recorded_at = NOW()`,
+      [challengeId, userId, result_value]
+    );
+
+    res.json({ success: true, message: "Resultado registrado com sucesso!" });
+  } catch (err) {
+    console.error("Erro ao registrar resultado do desafio:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/challenge/:id/ranking", validateDBSession, async (req, res) => {
+  const { id: challengeId } = req.params;
+
+  try {
+    // Obter o tipo de desafio para determinar a ordem do ranking
+    const challengeTypeRes = await pool.query(
+      "SELECT challenge_type FROM social_challenges WHERE id = $1",
+      [challengeId]
+    );
+
+    if (challengeTypeRes.rows.length === 0) {
+      return res.status(404).json({ error: "Desafio não encontrado." });
+    }
+
+    const challengeType = challengeTypeRes.rows[0].challenge_type;
+    let orderByClause = "scr.result_value ASC"; // Padrão para tempo (menor é melhor)
+
+    // Exemplos de tipos que podem ter ranking decrescente (maior é melhor)
+    if (challengeType.includes("Max Weight") || challengeType.includes("Repetições")) {
+      orderByClause = "scr.result_value DESC";
+    }
+
+    const ranking = await pool.query(
+      `SELECT
+          p.id as participant_id, p.name, p.photo,
+          scr.result_value, scr.recorded_at
+       FROM
+          social_challenge_results scr
+       JOIN
+          participants p ON scr.participant_id = p.id
+       WHERE
+          scr.challenge_id = $1
+       ORDER BY ${orderByClause}`,
+      [challengeId]
+    );
+
+    res.json({ success: true, ranking: ranking.rows, challengeType });
+  } catch (err) {
+    console.error("Erro ao buscar ranking do desafio:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
