@@ -505,7 +505,7 @@ router.get("/challenge/:id/ranking", validateDBSession, async (req, res) => {
   }
 });
 
-// *** NOVO ENDPOINT DE BUSCA (era o que estava faltando!) ***
+// *** NOVO ENDPOINT DE BUSCA ***
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
   if (!q || q.trim().length < 2) return res.json({ users: [] });
