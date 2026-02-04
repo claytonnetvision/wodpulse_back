@@ -52,7 +52,7 @@ router.get('/profile', validateDBSession, async (req, res) => {
       SELECT 
         (SELECT COUNT(*) FROM social_challenges WHERE creator_id = $1 OR opponent_id = $1) as challenges,
         (SELECT COUNT(*) FROM social_matches WHERE user_id_1 = $1 AND status = 'matched') as likes,
-        (SELECT COUNT(*) FROM social_matches WHERE (user_id_1 = $1 OR user_id_2 = $1) AND status = 'matched') as matches
+        (SELECT COUNT(*) FROM social_matches WHERE (user_id_1 = $1 OR user_id_2 = $1) AND status = 'mutual_match') as matches
     `, [req.user.participant_id]);
 
     res.json({ ...user, stats: statsRes.rows[0] });
@@ -75,14 +75,43 @@ router.get('/candidates', validateDBSession, async (req, res) => {
 
 router.post('/match', validateDBSession, async (req, res) => {
   const { targetId, action } = req.body;
+  const userId = req.user.participant_id; // O usuário logado
+
   try {
-    await pool.query(`
-      INSERT INTO social_matches (user_id_1, user_id_2, status) 
-      VALUES ($1, $2, $3) 
-      ON CONFLICT (user_id_1, user_id_2) DO UPDATE SET status = $3
-    `, [req.user.participant_id, targetId, action === 'like' ? 'matched' : 'rejected']);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    // 1. Registrar a ação do usuário atual (user_id_1 -> targetId)
+    await pool.query(
+      `INSERT INTO social_matches (user_id_1, user_id_2, status)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id_1, user_id_2) DO UPDATE SET status = $3`,
+      [userId, targetId, action === "like" ? "matched" : "rejected"]
+    );
+
+    // 2. Se a ação for 'like', verificar se há reciprocidade
+    if (action === "like") {
+      const reciprocalMatch = await pool.query(
+        `SELECT id FROM social_matches
+         WHERE user_id_1 = $1 AND user_id_2 = $2 AND status = 'matched'`,
+        [targetId, userId] // Verifica se o targetId já curtiu o userId
+      );
+
+      if (reciprocalMatch.rows.length > 0) {
+        // Match recíproco encontrado! Atualizar ambos os status para 'mutual_match'
+        await pool.query(
+          `UPDATE social_matches SET status = 'mutual_match'
+           WHERE (user_id_1 = $1 AND user_id_2 = $2) OR (user_id_1 = $2 AND user_id_2 = $1)`,
+          [userId, targetId]
+        );
+        // Opcional: Notificar ambos os usuários sobre o match mútuo
+        res.json({ success: true, message: "Match mútuo!", mutualMatch: true });
+        return;
+      }
+    }
+
+    res.json({ success: true, message: "Ação registrada." });
+  } catch (err) {
+    console.error("Erro ao registrar match:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/challenge/create', validateDBSession, async (req, res) => {
@@ -95,6 +124,30 @@ router.post('/challenge/create', validateDBSession, async (req, res) => {
     }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Novo endpoint para listar matches mútuos
+router.get('/mutual-matches', validateDBSession, async (req, res) => {
+  const userId = req.user.participant_id;
+  try {
+    const result = await pool.query(
+      `SELECT
+          p.id, p.name, p.photo, p.age, p.box_id
+       FROM
+          social_matches sm
+       JOIN
+          participants p ON (p.id = sm.user_id_2 AND sm.user_id_1 = $1)
+                       OR (p.id = sm.user_id_1 AND sm.user_id_2 = $1)
+       WHERE
+          sm.status = 'mutual_match'
+          AND (sm.user_id_1 = $1 OR sm.user_id_2 = $1)`,
+      [userId]
+    );
+    res.json({ success: true, matches: result.rows });
+  } catch (err) {
+    console.error("Erro ao buscar matches mútuos:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
