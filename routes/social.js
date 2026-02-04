@@ -114,6 +114,8 @@ router.post('/match', validateDBSession, async (req, res) => {
   }
 });
 
+// --- DESAFIOS ---
+
 router.post('/challenge/create', validateDBSession, async (req, res) => {
   const { opponentIds, type, duration } = req.body;
   try {
@@ -124,6 +126,28 @@ router.post('/challenge/create', validateDBSession, async (req, res) => {
     }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Listar desafios onde o usuário é criador ou oponente
+router.get('/challenges', validateDBSession, async (req, res) => {
+  const userId = req.user.participant_id;
+  try {
+    const result = await pool.query(`
+      SELECT 
+        c.id, c.challenge_type, c.end_date, c.created_at,
+        p1.name as creator_name, p1.photo as creator_photo,
+        p2.name as opponent_name, p2.photo as opponent_photo
+      FROM social_challenges c
+      JOIN participants p1 ON c.creator_id = p1.id
+      JOIN participants p2 ON c.opponent_id = p2.id
+      WHERE c.creator_id = $1 OR c.opponent_id = $1
+      ORDER BY c.created_at DESC
+    `, [userId]);
+    res.json({ success: true, challenges: result.rows });
+  } catch (err) {
+    console.error("Erro ao buscar desafios:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Novo endpoint para listar matches mútuos
