@@ -14,7 +14,7 @@ const validateDBSession = async (req, res, next) => {
   if (!token) return res.status(401).json({ error: 'Token não fornecido' });
   try {
     const result = await pool.query(`
-      SELECT s.*, p.name, p.email, p.box_id 
+      SELECT s.*, p.id as participant_id, p.name, p.box_id 
       FROM social_sessions s
       JOIN participants p ON s.participant_id = p.id
       WHERE s.session_token = $1 AND s.expires_at > NOW()
@@ -44,10 +44,10 @@ router.post('/login', async (req, res) => {
 
 router.get('/profile', validateDBSession, async (req, res) => {
   try {
+    // Busca foto separadamente se necessário para evitar payloads gigantes
     const userRes = await pool.query('SELECT id, name, photo, box_id FROM participants WHERE id = $1', [req.user.participant_id]);
     const user = userRes.rows[0];
     
-    // Conta estatísticas reais
     const statsRes = await pool.query(`
       SELECT 
         (SELECT COUNT(*) FROM social_challenges WHERE creator_id = $1 OR opponent_id = $1) as challenges,
@@ -61,11 +61,13 @@ router.get('/profile', validateDBSession, async (req, res) => {
 
 router.get('/candidates', validateDBSession, async (req, res) => {
   try {
+    // Limitamos a 5 candidatos e otimizamos a query para evitar URI_TOO_LONG
     const result = await pool.query(`
       SELECT id, name, photo, age, box_id 
       FROM participants 
       WHERE id != $1 
-      ORDER BY RANDOM() LIMIT 10
+      AND photo IS NOT NULL
+      ORDER BY RANDOM() LIMIT 5
     `, [req.user.participant_id]);
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
