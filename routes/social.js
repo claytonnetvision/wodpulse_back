@@ -505,4 +505,26 @@ router.get("/challenge/:id/ranking", validateDBSession, async (req, res) => {
   }
 });
 
+// *** NOVO ENDPOINT DE BUSCA (era o que estava faltando!) ***
+router.get('/search-users', validateDBSession, async (req, res) => {
+  const { q } = req.query;
+  if (!q || q.trim().length < 2) return res.json({ users: [] });
+
+  try {
+    const result = await pool.query(`
+      SELECT id, name, photo, box_id 
+      FROM participants 
+      WHERE LOWER(name) LIKE LOWER($1)
+      AND id != $2
+      ORDER BY name ASC
+      LIMIT 20
+    `, [`%${q.trim()}%`, req.user.participant_id]);
+
+    res.json({ users: result.rows });
+  } catch (err) {
+    console.error('Erro search-users:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
