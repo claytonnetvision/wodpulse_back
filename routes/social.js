@@ -125,9 +125,11 @@ router.post('/challenge/create', validateDBSession, async (req, res) => {
 router.get('/challenges', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
+    // Busca os desafios garantindo que as colunas existam
     const result = await pool.query(`
       SELECT 
         c.id, c.challenge_type, c.end_date, c.created_at, c.status, c.response_message,
+        c.creator_id, c.opponent_id,
         p1.name as creator_name, p1.photo as creator_photo,
         p2.name as opponent_name, p2.photo as opponent_photo
       FROM social_challenges c
@@ -140,7 +142,7 @@ router.get('/challenges', validateDBSession, async (req, res) => {
     res.json({ success: true, challenges: result.rows });
   } catch (err) {
     console.error("Erro ao buscar desafios:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Erro interno ao carregar desafios. Verifique se as colunas 'status' e 'response_message' existem na tabela social_challenges." });
   }
 });
 
