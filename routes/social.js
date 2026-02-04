@@ -44,7 +44,7 @@ router.post('/login', async (req, res) => {
 
 router.get('/profile', validateDBSession, async (req, res) => {
   try {
-    const userRes = await pool.query('SELECT id, name, photo, box_id FROM participants WHERE id = $1', [req.user.participant_id]);
+    const userRes = await pool.query('SELECT id, name, photo, box_id, progress_privacy FROM participants WHERE id = $1', [req.user.participant_id]);
     const user = userRes.rows[0];
     
     const statsRes = await pool.query(`
@@ -54,8 +54,14 @@ router.get('/profile', validateDBSession, async (req, res) => {
         (SELECT COUNT(*) FROM social_matches WHERE (user_id_1 = $1 OR user_id_2 = $1) AND status = 'mutual_match') as matches
     `, [req.user.participant_id]);
 
-    res.json({ ...user, stats: statsRes.rows[0] });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ 
+      ...user, 
+      stats: statsRes.rows[0],
+      progress_privacy: user.progress_privacy || 'friends_only'
+    });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 router.get('/candidates', validateDBSession, async (req, res) => {
@@ -113,6 +119,10 @@ router.post('/match', validateDBSession, async (req, res) => {
 router.post('/challenge/create', validateDBSession, async (req, res) => {
   const { opponentIds, type, duration } = req.body;
   try {
+    const validTypes = ['amrap', 'for_time', 'max_reps', 'murph', 'calories_week', 'calories_month'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ error: 'Tipo de desafio inválido' });
+    }
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + parseInt(duration));
     for (const oppId of opponentIds) {
@@ -125,7 +135,6 @@ router.post('/challenge/create', validateDBSession, async (req, res) => {
 router.get('/challenges', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
-    // Busca os desafios garantindo que as colunas existam
     const result = await pool.query(`
       SELECT 
         c.id, c.challenge_type, c.end_date, c.created_at, c.status, c.response_message,
@@ -142,23 +151,23 @@ router.get('/challenges', validateDBSession, async (req, res) => {
     res.json({ success: true, challenges: result.rows });
   } catch (err) {
     console.error("Erro ao buscar desafios:", err);
-    res.status(500).json({ error: "Erro interno ao carregar desafios. Verifique se as colunas 'status' e 'response_message' existem na tabela social_challenges." });
+    res.status(500).json({ error: "Erro interno ao carregar desafios." });
   }
 });
 
-router.get("/participants-for-challenges", validateDBSession, async (req, res) => {
-  const userId = req.user.participant_id;
+// Lista participantes para desafios (com foto)
+router.get('/participants-for-challenges', validateDBSession, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, name, photo, age, box_id
-       FROM participants
-       WHERE id != $1
-       ORDER BY name ASC`,
-      [userId]
-    );
+    const result = await pool.query(`
+      SELECT id, name, photo 
+      FROM participants 
+      WHERE id != $1 AND photo IS NOT NULL
+      ORDER BY name ASC
+    `, [req.user.participant_id]);
+
     res.json({ success: true, participants: result.rows });
   } catch (err) {
-    console.error("Erro ao buscar participantes para desafios:", err);
+    console.error('Erro ao listar participantes para desafios:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -269,7 +278,8 @@ router.post("/challenges/bulk-delete", validateDBSession, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// Perfil público – só acessível se for match mútuo
+
+// Perfil público (match mútuo)
 router.get('/public-profile/:id', validateDBSession, async (req, res) => {
   const { id } = req.params;
   const currentUserId = req.user.participant_id;
@@ -279,7 +289,6 @@ router.get('/public-profile/:id', validateDBSession, async (req, res) => {
   }
 
   try {
-    // Verifica se é match mútuo
     const matchCheck = await pool.query(`
       SELECT 1 FROM social_matches 
       WHERE status = 'mutual_match' 
@@ -290,7 +299,6 @@ router.get('/public-profile/:id', validateDBSession, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado – apenas matches mútuos' });
     }
 
-    // Dados públicos
     const userRes = await pool.query(`
       SELECT id, name, photo, age, box_id 
       FROM participants 
@@ -307,25 +315,10 @@ router.get('/public-profile/:id', validateDBSession, async (req, res) => {
     res.status(500).json({ error: 'Erro interno' });
   }
 });
-// Lista todos os participantes exceto o usuário logado (para seleção de oponentes)
-router.get('/participants-for-challenges', validateDBSession, async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT id, name, photo 
-      FROM participants 
-      WHERE id != $1 AND photo IS NOT NULL
-      ORDER BY name ASC
-    `, [req.user.participant_id]);
 
-    res.json({ success: true, participants: result.rows });
-  } catch (err) {
-    console.error('Erro ao listar participantes para desafios:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-// Configurar privacidade do progresso
+// Privacidade
 router.post('/privacy/set', validateDBSession, async (req, res) => {
-  const { privacy } = req.body;  // 'public', 'friends_only', 'private'
+  const { privacy } = req.body;
   if (!['public', 'friends_only', 'private'].includes(privacy)) {
     return res.status(400).json({ error: 'Valor inválido' });
   }
@@ -337,14 +330,13 @@ router.post('/privacy/set', validateDBSession, async (req, res) => {
   }
 });
 
-// Solicitar amizade
+// Amizades
 router.post('/friend/request', validateDBSession, async (req, res) => {
   const { targetId } = req.body;
   const userId = req.user.participant_id;
   if (parseInt(targetId) === userId) return res.status(400).json({ error: 'Não pode adicionar você mesmo' });
 
   try {
-    // Verifica se já existe pedido
     const existing = await pool.query('SELECT status FROM social_friends WHERE (requester_id = $1 AND target_id = $2) OR (requester_id = $2 AND target_id = $1)', [userId, targetId]);
     if (existing.rows.length > 0 && existing.rows[0].status === 'accepted') {
       return res.json({ success: true, message: 'Já são amigos' });
@@ -360,9 +352,8 @@ router.post('/friend/request', validateDBSession, async (req, res) => {
   }
 });
 
-// Responder pedido de amizade
 router.post('/friend/respond', validateDBSession, async (req, res) => {
-  const { requesterId, action } = req.body;  // action: 'accept' ou 'reject'
+  const { requesterId, action } = req.body;
   const userId = req.user.participant_id;
 
   try {
@@ -377,7 +368,6 @@ router.post('/friend/respond', validateDBSession, async (req, res) => {
   }
 });
 
-// Lista de amigos + pedidos pendentes
 router.get('/friends', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
@@ -403,11 +393,10 @@ router.get('/friends', validateDBSession, async (req, res) => {
   }
 });
 
-// Verifica se é amigo aceito
 router.get('/is-friend/:id', validateDBSession, async (req, res) => {
   const targetId = parseInt(req.params.id);
   const userId = req.user.participant_id;
-  if (targetId === userId) return res.json({ isFriend: true });  // próprio usuário
+  if (targetId === userId) return res.json({ isFriend: true });
 
   try {
     const result = await pool.query(`
@@ -420,6 +409,7 @@ router.get('/is-friend/:id', validateDBSession, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 router.post("/challenge/:id/result", validateDBSession, async (req, res) => {
   const { id: challengeId } = req.params;
   const userId = req.user.participant_id;
@@ -443,6 +433,49 @@ router.post("/challenge/:id/result", validateDBSession, async (req, res) => {
   }
 });
 
+// Calorias automáticas
+router.get('/challenge/:id/calories-summary', validateDBSession, async (req, res) => {
+  const challengeId = parseInt(req.params.id);
+  const userId = req.user.participant_id;
+
+  try {
+    const challengeRes = await pool.query('SELECT * FROM social_challenges WHERE id = $1', [challengeId]);
+    if (challengeRes.rows.length === 0) return res.status(404).json({ error: 'Desafio não encontrado' });
+
+    const c = challengeRes.rows[0];
+    if (c.status !== 'accepted') return res.status(400).json({ error: 'Desafio não aceito' });
+    if (![c.creator_id, c.opponent_id].includes(userId)) return res.status(403).json({ error: 'Sem acesso' });
+
+    if (!c.challenge_type.startsWith('calories_')) return res.status(400).json({ error: 'Não é desafio de calorias' });
+
+    const days = c.challenge_type === 'calories_week' ? 7 : 30;
+    const startDate = new Date(c.end_date);
+    startDate.setDate(startDate.getDate() - days);
+
+    const caloriesRes = await pool.query(`
+      SELECT COALESCE(SUM(sp.calories_total), 0) as total
+      FROM sessions s
+      JOIN session_participants sp ON s.id = sp.session_id
+      WHERE sp.participant_id = $1
+        AND s.date_start >= $2
+        AND s.date_start <= $3
+    `, [userId, startDate, c.end_date]);
+
+    const totalCalories = parseFloat(caloriesRes.rows[0].total);
+
+    await pool.query(`
+      INSERT INTO social_challenge_results (challenge_id, participant_id, result_value)
+      VALUES ($1, $2, $3::text)
+      ON CONFLICT (challenge_id, participant_id) DO UPDATE SET result_value = $3::text
+    `, [challengeId, userId, totalCalories]);
+
+    res.json({ totalCalories });
+  } catch (err) {
+    console.error('Erro calories-summary:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/challenge/:id/ranking", validateDBSession, async (req, res) => {
   const { id: challengeId } = req.params;
 
@@ -452,14 +485,16 @@ router.get("/challenge/:id/ranking", validateDBSession, async (req, res) => {
     
     const type = challengeRes.rows[0].challenge_type.toLowerCase();
     const isTimeBased = type.includes("time") || type.includes("murph");
-    const orderBy = isTimeBased ? "ASC" : "DESC";
+    const isCalories = type.startsWith('calories_');
+    const isHigherBetter = isCalories || type === 'amrap' || type === 'max_reps';
+    const orderBy = isHigherBetter ? "DESC" : (isTimeBased ? "ASC" : "DESC");
 
     const result = await pool.query(
       `SELECT r.result_value, p.name, p.photo
        FROM social_challenge_results r
        JOIN participants p ON r.participant_id = p.id
        WHERE r.challenge_id = $1
-       ORDER BY r.result_value ${orderBy}`,
+       ORDER BY r.result_value ${orderBy} NULLS LAST`,
       [challengeId]
     );
 

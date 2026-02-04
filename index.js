@@ -8,19 +8,34 @@ const port = process.env.PORT || 3001;
 const { gerarAnaliseGemini } = require('./utils/gemini'); // ajuste o caminho
 const socialRouter = require('./routes/social');
 
-app.use(cors({
-  origin: [
+// Middleware CORS manual (mais robusto no Render)
+app.use((req, res, next) => {
+  const allowedOrigins = [
     'https://www.infrapower.com.br',
     'https://wodpulse-front-f2lo92fpz-robson-claytons-projects.vercel.app',
     'http://localhost:3000',
     'http://127.0.0.1:3000'
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-}));
+  ];
+
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', 'https://www.infrapower.com.br'); // fallback para sua origem principal
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  // Responde preflight imediatamente
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+
+  next();
+});
 
 app.options('*', cors());
 
