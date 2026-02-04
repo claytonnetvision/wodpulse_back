@@ -6,7 +6,7 @@ const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3001;
 const { gerarAnaliseGemini } = require('./utils/gemini'); // ajuste o caminho
-
+const socialRouter = require('./routes/social');
 
 app.use(cors({
   origin: [
@@ -55,6 +55,7 @@ app.get('/', (req, res) => {
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/participants', require('./routes/participants'));
 app.use('/api/body-progress', require('./routes/body-progress'));
+app.use('/api/social', socialRouter);
 const sessionsRouter = express.Router();
 // Novo endpoint para análise de progresso corporal
 app.post('/api/ai-analyze-body-progress', async (req, res) => {
