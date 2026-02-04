@@ -269,7 +269,157 @@ router.post("/challenges/bulk-delete", validateDBSession, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// Perfil público – só acessível se for match mútuo
+router.get('/public-profile/:id', validateDBSession, async (req, res) => {
+  const { id } = req.params;
+  const currentUserId = req.user.participant_id;
 
+  if (parseInt(id) === currentUserId) {
+    return res.status(400).json({ error: 'Use /profile para o próprio perfil' });
+  }
+
+  try {
+    // Verifica se é match mútuo
+    const matchCheck = await pool.query(`
+      SELECT 1 FROM social_matches 
+      WHERE status = 'mutual_match' 
+      AND ((user_id_1 = $1 AND user_id_2 = $2) OR (user_id_1 = $2 AND user_id_2 = $1))
+    `, [currentUserId, id]);
+
+    if (matchCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Acesso negado – apenas matches mútuos' });
+    }
+
+    // Dados públicos
+    const userRes = await pool.query(`
+      SELECT id, name, photo, age, box_id 
+      FROM participants 
+      WHERE id = $1
+    `, [id]);
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    res.json(userRes.rows[0]);
+  } catch (err) {
+    console.error('Erro public-profile:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+// Lista todos os participantes exceto o usuário logado (para seleção de oponentes)
+router.get('/participants-for-challenges', validateDBSession, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, photo 
+      FROM participants 
+      WHERE id != $1 AND photo IS NOT NULL
+      ORDER BY name ASC
+    `, [req.user.participant_id]);
+
+    res.json({ success: true, participants: result.rows });
+  } catch (err) {
+    console.error('Erro ao listar participantes para desafios:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// Configurar privacidade do progresso
+router.post('/privacy/set', validateDBSession, async (req, res) => {
+  const { privacy } = req.body;  // 'public', 'friends_only', 'private'
+  if (!['public', 'friends_only', 'private'].includes(privacy)) {
+    return res.status(400).json({ error: 'Valor inválido' });
+  }
+  try {
+    await pool.query('UPDATE participants SET progress_privacy = $1 WHERE id = $2', [privacy, req.user.participant_id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Solicitar amizade
+router.post('/friend/request', validateDBSession, async (req, res) => {
+  const { targetId } = req.body;
+  const userId = req.user.participant_id;
+  if (parseInt(targetId) === userId) return res.status(400).json({ error: 'Não pode adicionar você mesmo' });
+
+  try {
+    // Verifica se já existe pedido
+    const existing = await pool.query('SELECT status FROM social_friends WHERE (requester_id = $1 AND target_id = $2) OR (requester_id = $2 AND target_id = $1)', [userId, targetId]);
+    if (existing.rows.length > 0 && existing.rows[0].status === 'accepted') {
+      return res.json({ success: true, message: 'Já são amigos' });
+    }
+
+    await pool.query(
+      'INSERT INTO social_friends (requester_id, target_id, status) VALUES ($1, $2, $3) ON CONFLICT (requester_id, target_id) DO UPDATE SET status = $3',
+      [userId, targetId, 'pending']
+    );
+    res.json({ success: true, message: 'Pedido enviado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Responder pedido de amizade
+router.post('/friend/respond', validateDBSession, async (req, res) => {
+  const { requesterId, action } = req.body;  // action: 'accept' ou 'reject'
+  const userId = req.user.participant_id;
+
+  try {
+    if (action === 'accept') {
+      await pool.query('UPDATE social_friends SET status = $1 WHERE requester_id = $2 AND target_id = $3', ['accepted', requesterId, userId]);
+    } else {
+      await pool.query('DELETE FROM social_friends WHERE requester_id = $2 AND target_id = $3', [requesterId, userId]);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lista de amigos + pedidos pendentes
+router.get('/friends', validateDBSession, async (req, res) => {
+  const userId = req.user.participant_id;
+  try {
+    const friends = await pool.query(`
+      SELECT p.id, p.name, p.photo, 'accepted' as relation 
+      FROM social_friends f 
+      JOIN participants p ON (p.id = f.requester_id OR p.id = f.target_id)
+      WHERE (f.requester_id = $1 OR f.target_id = $1) 
+      AND f.status = 'accepted' 
+      AND p.id != $1
+    `, [userId]);
+
+    const pending = await pool.query(`
+      SELECT p.id, p.name, p.photo 
+      FROM social_friends f 
+      JOIN participants p ON p.id = f.requester_id
+      WHERE f.target_id = $1 AND f.status = 'pending'
+    `, [userId]);
+
+    res.json({ friends: friends.rows, pendingRequests: pending.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Verifica se é amigo aceito
+router.get('/is-friend/:id', validateDBSession, async (req, res) => {
+  const targetId = parseInt(req.params.id);
+  const userId = req.user.participant_id;
+  if (targetId === userId) return res.json({ isFriend: true });  // próprio usuário
+
+  try {
+    const result = await pool.query(`
+      SELECT status FROM social_friends 
+      WHERE (requester_id = $1 AND target_id = $2) OR (requester_id = $2 AND target_id = $1)
+    `, [userId, targetId]);
+    const isFriend = result.rows.length > 0 && result.rows[0].status === 'accepted';
+    res.json({ isFriend });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 router.post("/challenge/:id/result", validateDBSession, async (req, res) => {
   const { id: challengeId } = req.params;
   const userId = req.user.participant_id;
