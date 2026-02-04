@@ -857,7 +857,7 @@ Data da aula de hoje: ${classDate}`
       console.error('[TEST-GEMINI-EMAIL] Erro:', response.status, errorText);
       throw new Error(`Gemini retornou ${response.status}: ${errorText}`);
     }
-
+app.use('/api/social', socialRouter);
 
     const json = await response.json();
     const comentario = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Sem comentário gerado';
@@ -880,7 +880,6 @@ Data da aula de hoje: ${classDate}`
     });
   }
 });
-app.use('/api/social', socialRouter);
 
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);
