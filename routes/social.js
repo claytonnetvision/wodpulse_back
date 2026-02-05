@@ -368,28 +368,40 @@ router.post('/friend/respond', validateDBSession, async (req, res) => {
   }
 });
 
+// ===== ENDPOINT /friends AJUSTADO PARA SUA TABELA social_friends =====
+// Retorna pendingRequests (pedidos recebidos) e confirmedFriends (amigos aceitos)
+// Compatível com o frontend que eu enviei (perfil-social.html)
 router.get('/friends', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
-    const friends = await pool.query(`
-      SELECT p.id, p.name, p.photo, 'accepted' as relation 
-      FROM social_friends f 
-      JOIN participants p ON (p.id = f.requester_id OR p.id = f.target_id)
-      WHERE (f.requester_id = $1 OR f.target_id = $1) 
-      AND f.status = 'accepted' 
-      AND p.id != $1
-    `, [userId]);
-
-    const pending = await pool.query(`
+    // Pedidos pendentes recebidos (eu sou target_id)
+    const pendingRes = await pool.query(`
       SELECT p.id, p.name, p.photo 
       FROM social_friends f 
-      JOIN participants p ON p.id = f.requester_id
+      JOIN participants p ON f.requester_id = p.id
       WHERE f.target_id = $1 AND f.status = 'pending'
+      ORDER BY f.created_at DESC
     `, [userId]);
 
-    res.json({ friends: friends.rows, pendingRequests: pending.rows });
+    // Amigos confirmados (bidirecional, status 'accepted')
+    const friendsRes = await pool.query(`
+      SELECT p.id, p.name, p.photo
+      FROM social_friends f 
+      JOIN participants p ON 
+        (f.requester_id = $1 AND f.target_id = p.id) OR 
+        (f.target_id = $1 AND f.requester_id = p.id)
+      WHERE f.status = 'accepted'
+      AND p.id != $1
+      ORDER BY f.created_at DESC
+    `, [userId]);
+
+    res.json({
+      pendingRequests: pendingRes.rows,
+      confirmedFriends: friendsRes.rows
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Erro em /friends:', err);
+    res.status(500).json({ error: 'Erro ao carregar amigos/pedidos' });
   }
 });
 
@@ -504,7 +516,19 @@ router.get("/challenge/:id/ranking", validateDBSession, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+router.post('/profile/update', validateDBSession, async (req, res) => {
+  const { bio, cover_photo } = req.body;
+  try {
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    if (bio !== undefined) { fields.push(`bio = $${idx++}`); values.push(bio); }
+    if (cover_photo !== undefined) { fields.push(`cover_photo = $${idx++}`); values.push(cover_photo); }
+    values.push(req.user.participant_id);
+    await pool.query(`UPDATE participants SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 // *** NOVO ENDPOINT DE BUSCA ***
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
