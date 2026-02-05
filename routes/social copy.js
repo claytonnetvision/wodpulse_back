@@ -44,7 +44,7 @@ router.post('/login', async (req, res) => {
 
 router.get('/profile', validateDBSession, async (req, res) => {
   try {
-    const userRes = await pool.query('SELECT id, name, photo, box_id, progress_privacy, bio, cover_photo FROM participants WHERE id = $1', [req.user.participant_id]);
+    const userRes = await pool.query('SELECT id, name, photo, box_id, progress_privacy FROM participants WHERE id = $1', [req.user.participant_id]);
     const user = userRes.rows[0];
     
     const statsRes = await pool.query(`
@@ -155,6 +155,7 @@ router.get('/challenges', validateDBSession, async (req, res) => {
   }
 });
 
+// Lista participantes para desafios (com foto)
 router.get('/participants-for-challenges', validateDBSession, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -253,39 +254,83 @@ router.delete("/challenge/:id", validateDBSession, async (req, res) => {
   }
 });
 
-// --- MENSAGENS (CHAT) ---
-
-router.get('/messages/:friendId', validateDBSession, async (req, res) => {
+router.post("/challenges/bulk-delete", validateDBSession, async (req, res) => {
+  const { challengeIds } = req.body;
   const userId = req.user.participant_id;
-  const friendId = req.params.friendId;
-  try {
-    const result = await pool.query(`
-      SELECT * FROM social_messages 
-      WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)
-      ORDER BY created_at ASC
-    `, [userId, friendId]);
-    res.json({ success: true, messages: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
-router.post('/messages/send', validateDBSession, async (req, res) => {
-  const { receiverId, content } = req.body;
-  const senderId = req.user.participant_id;
+  if (!Array.isArray(challengeIds) || challengeIds.length === 0) {
+    return res.status(400).json({ error: "IDs de desafios inválidos." });
+  }
+
   try {
     const result = await pool.query(
-      'INSERT INTO social_messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *',
-      [senderId, receiverId, content]
+      `DELETE FROM social_challenges WHERE id = ANY($1::int[]) AND creator_id = $2 RETURNING id`,
+      [challengeIds, userId]
     );
-    res.json({ success: true, message: result.rows[0] });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Nenhum desafio encontrado ou sem permissão." });
+    }
+
+    res.json({ success: true, message: `${result.rows.length} desafios excluídos com sucesso.` });
+  } catch (err) {
+    console.error("Erro ao excluir desafios em massa:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Perfil público (match mútuo)
+router.get('/public-profile/:id', validateDBSession, async (req, res) => {
+  const { id } = req.params;
+  const currentUserId = req.user.participant_id;
+
+  if (parseInt(id) === currentUserId) {
+    return res.status(400).json({ error: 'Use /profile para o próprio perfil' });
+  }
+
+  try {
+    const matchCheck = await pool.query(`
+      SELECT 1 FROM social_matches 
+      WHERE status = 'mutual_match' 
+      AND ((user_id_1 = $1 AND user_id_2 = $2) OR (user_id_1 = $2 AND user_id_2 = $1))
+    `, [currentUserId, id]);
+
+    if (matchCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Acesso negado – apenas matches mútuos' });
+    }
+
+    const userRes = await pool.query(`
+      SELECT id, name, photo, age, box_id 
+      FROM participants 
+      WHERE id = $1
+    `, [id]);
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    res.json(userRes.rows[0]);
+  } catch (err) {
+    console.error('Erro public-profile:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// Privacidade
+router.post('/privacy/set', validateDBSession, async (req, res) => {
+  const { privacy } = req.body;
+  if (!['public', 'friends_only', 'private'].includes(privacy)) {
+    return res.status(400).json({ error: 'Valor inválido' });
+  }
+  try {
+    await pool.query('UPDATE participants SET progress_privacy = $1 WHERE id = $2', [privacy, req.user.participant_id]);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// --- AMIZADES ---
-
+// Amizades
 router.post('/friend/request', validateDBSession, async (req, res) => {
   const { targetId } = req.body;
   const userId = req.user.participant_id;
@@ -323,9 +368,13 @@ router.post('/friend/respond', validateDBSession, async (req, res) => {
   }
 });
 
+// ===== ENDPOINT /friends AJUSTADO PARA SUA TABELA social_friends =====
+// Retorna pendingRequests (pedidos recebidos) e confirmedFriends (amigos aceitos)
+// Compatível com o frontend que eu enviei (perfil-social.html)
 router.get('/friends', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
+    // Pedidos pendentes recebidos (eu sou target_id)
     const pendingRes = await pool.query(`
       SELECT p.id, p.name, p.photo 
       FROM social_friends f 
@@ -334,6 +383,7 @@ router.get('/friends', validateDBSession, async (req, res) => {
       ORDER BY f.created_at DESC
     `, [userId]);
 
+    // Amigos confirmados (bidirecional, status 'accepted')
     const friendsRes = await pool.query(`
       SELECT p.id, p.name, p.photo
       FROM social_friends f 
@@ -350,6 +400,7 @@ router.get('/friends', validateDBSession, async (req, res) => {
       confirmedFriends: friendsRes.rows
     });
   } catch (err) {
+    console.error('Erro em /friends:', err);
     res.status(500).json({ error: 'Erro ao carregar amigos/pedidos' });
   }
 });
@@ -371,6 +422,114 @@ router.get('/is-friend/:id', validateDBSession, async (req, res) => {
   }
 });
 
+router.post("/challenge/:id/result", validateDBSession, async (req, res) => {
+  const { id: challengeId } = req.params;
+  const userId = req.user.participant_id;
+  const { result_value } = req.body;
+
+  if (result_value === undefined || result_value === null) {
+    return res.status(400).json({ error: "O valor do resultado é obrigatório." });
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO social_challenge_results (challenge_id, participant_id, result_value)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (challenge_id, participant_id) DO UPDATE SET result_value = $3`,
+      [challengeId, userId, result_value]
+    );
+    res.json({ success: true, message: "Resultado registrado com sucesso!" });
+  } catch (err) {
+    console.error("Erro ao registrar resultado:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Calorias automáticas
+router.get('/challenge/:id/calories-summary', validateDBSession, async (req, res) => {
+  const challengeId = parseInt(req.params.id);
+  const userId = req.user.participant_id;
+
+  try {
+    const challengeRes = await pool.query('SELECT * FROM social_challenges WHERE id = $1', [challengeId]);
+    if (challengeRes.rows.length === 0) return res.status(404).json({ error: 'Desafio não encontrado' });
+
+    const c = challengeRes.rows[0];
+    if (c.status !== 'accepted') return res.status(400).json({ error: 'Desafio não aceito' });
+    if (![c.creator_id, c.opponent_id].includes(userId)) return res.status(403).json({ error: 'Sem acesso' });
+
+    if (!c.challenge_type.startsWith('calories_')) return res.status(400).json({ error: 'Não é desafio de calorias' });
+
+    const days = c.challenge_type === 'calories_week' ? 7 : 30;
+    const startDate = new Date(c.end_date);
+    startDate.setDate(startDate.getDate() - days);
+
+    const caloriesRes = await pool.query(`
+      SELECT COALESCE(SUM(sp.calories_total), 0) as total
+      FROM sessions s
+      JOIN session_participants sp ON s.id = sp.session_id
+      WHERE sp.participant_id = $1
+        AND s.date_start >= $2
+        AND s.date_start <= $3
+    `, [userId, startDate, c.end_date]);
+
+    const totalCalories = parseFloat(caloriesRes.rows[0].total);
+
+    await pool.query(`
+      INSERT INTO social_challenge_results (challenge_id, participant_id, result_value)
+      VALUES ($1, $2, $3::text)
+      ON CONFLICT (challenge_id, participant_id) DO UPDATE SET result_value = $3::text
+    `, [challengeId, userId, totalCalories]);
+
+    res.json({ totalCalories });
+  } catch (err) {
+    console.error('Erro calories-summary:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/challenge/:id/ranking", validateDBSession, async (req, res) => {
+  const { id: challengeId } = req.params;
+
+  try {
+    const challengeRes = await pool.query("SELECT challenge_type FROM social_challenges WHERE id = $1", [challengeId]);
+    if (challengeRes.rows.length === 0) return res.status(404).json({ error: "Desafio não encontrado" });
+    
+    const type = challengeRes.rows[0].challenge_type.toLowerCase();
+    const isTimeBased = type.includes("time") || type.includes("murph");
+    const isCalories = type.startsWith('calories_');
+    const isHigherBetter = isCalories || type === 'amrap' || type === 'max_reps';
+    const orderBy = isHigherBetter ? "DESC" : (isTimeBased ? "ASC" : "DESC");
+
+    const result = await pool.query(
+      `SELECT r.result_value, p.name, p.photo
+       FROM social_challenge_results r
+       JOIN participants p ON r.participant_id = p.id
+       WHERE r.challenge_id = $1
+       ORDER BY r.result_value ${orderBy} NULLS LAST`,
+      [challengeId]
+    );
+
+    res.json({ success: true, ranking: result.rows });
+  } catch (err) {
+    console.error("Erro ao buscar ranking:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+router.post('/profile/update', validateDBSession, async (req, res) => {
+  const { bio, cover_photo } = req.body;
+  try {
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    if (bio !== undefined) { fields.push(`bio = $${idx++}`); values.push(bio); }
+    if (cover_photo !== undefined) { fields.push(`cover_photo = $${idx++}`); values.push(cover_photo); }
+    values.push(req.user.participant_id);
+    await pool.query(`UPDATE participants SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+// *** NOVO ENDPOINT DE BUSCA ***
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
   if (!q || q.trim().length < 2) return res.json({ users: [] });
@@ -387,22 +546,9 @@ router.get('/search-users', validateDBSession, async (req, res) => {
 
     res.json({ users: result.rows });
   } catch (err) {
+    console.error('Erro search-users:', err);
     res.status(500).json({ error: err.message });
   }
-});
-
-router.post('/profile/update', validateDBSession, async (req, res) => {
-  const { bio, cover_photo } = req.body;
-  try {
-    const fields = [];
-    const values = [];
-    let idx = 1;
-    if (bio !== undefined) { fields.push(`bio = $${idx++}`); values.push(bio); }
-    if (cover_photo !== undefined) { fields.push(`cover_photo = $${idx++}`); values.push(cover_photo); }
-    values.push(req.user.participant_id);
-    await pool.query(`UPDATE participants SET ${fields.join(', ')} WHERE id = $${idx}`, values);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 module.exports = router;
