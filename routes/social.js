@@ -64,18 +64,31 @@ router.get('/profile', validateDBSession, async (req, res) => {
   }
 });
 
-// --- NOVAS ROTAS DE REDE SOCIAL (FEED, SCRAPS, FOTOS) ---
+// --- POSTS COM SUPORTE A FOTOS ---
 
-// Criar Postagem ou Scrap
 router.post('/posts', validateDBSession, async (req, res) => {
-  const { content, type, privacy, targetUserId } = req.body;
+  const { content, type, privacy, targetUserId, photoData } = req.body;
   const userId = req.user.participant_id;
 
   try {
     const result = await pool.query(
-      'INSERT INTO social_posts (user_id, content, type, privacy, target_user_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [userId, content, type || 'feed', privacy || 'public', targetUserId || null]
+      'INSERT INTO social_posts (user_id, content, type, privacy, target_user_id, photo_data) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [userId, content, type || 'feed', privacy || 'public', targetUserId || null, photoData || null]
     );
+    
+    // Processar menções (@username)
+    const mentions = content.match(/@(\w+)/g) || [];
+    for (const mention of mentions) {
+      const username = mention.substring(1);
+      const mentionedUserRes = await pool.query('SELECT id FROM participants WHERE LOWER(name) LIKE LOWER($1) LIMIT 1', [`%${username}%`]);
+      if (mentionedUserRes.rows.length > 0) {
+        await pool.query(
+          'INSERT INTO social_notifications (user_id, from_user_id, type, related_id) VALUES ($1, $2, $3, $4)',
+          [mentionedUserRes.rows[0].id, userId, 'mention', result.rows[0].id]
+        );
+      }
+    }
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Erro ao criar postagem:', err);
@@ -83,12 +96,14 @@ router.post('/posts', validateDBSession, async (req, res) => {
   }
 });
 
-// Buscar Feed (Meus posts + Amigos + Públicos)
 router.get('/feed', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
     const result = await pool.query(`
-      SELECT p.*, u.name as user_name, u.photo as user_photo 
+      SELECT p.*, u.name as user_name, u.photo as user_photo,
+        (SELECT COUNT(*) FROM social_post_reactions WHERE post_id = p.id AND reaction_type = 'like') as likes_count,
+        (SELECT COUNT(*) FROM social_post_reactions WHERE post_id = p.id AND reaction_type = 'dislike') as dislikes_count,
+        (SELECT reaction_type FROM social_post_reactions WHERE post_id = p.id AND user_id = $1) as user_reaction
       FROM social_posts p
       JOIN participants u ON p.user_id = u.id
       WHERE p.type = 'feed' 
@@ -111,7 +126,6 @@ router.get('/feed', validateDBSession, async (req, res) => {
   }
 });
 
-// Buscar Scraps de um usuário
 router.get('/scraps/:userId', validateDBSession, async (req, res) => {
   const targetId = req.params.userId;
   try {
@@ -129,22 +143,202 @@ router.get('/scraps/:userId', validateDBSession, async (req, res) => {
   }
 });
 
-// Buscar Fotos (Posts que podem ser considerados do álbum)
+// --- SISTEMA DE REAÇÕES (CURTIR/NÃO CURTIR) ---
+
+router.post('/posts/:postId/react', validateDBSession, async (req, res) => {
+  const { postId } = req.params;
+  const { reactionType } = req.body;
+  const userId = req.user.participant_id;
+
+  if (!['like', 'dislike'].includes(reactionType)) {
+    return res.status(400).json({ error: 'Tipo de reação inválido' });
+  }
+
+  try {
+    // Verifica se já existe reação
+    const existingRes = await pool.query(
+      'SELECT * FROM social_post_reactions WHERE post_id = $1 AND user_id = $2',
+      [postId, userId]
+    );
+
+    if (existingRes.rows.length > 0) {
+      // Se a reação é igual, remove; se é diferente, atualiza
+      if (existingRes.rows[0].reaction_type === reactionType) {
+        await pool.query('DELETE FROM social_post_reactions WHERE post_id = $1 AND user_id = $2', [postId, userId]);
+        return res.json({ success: true, message: 'Reação removida' });
+      } else {
+        await pool.query('UPDATE social_post_reactions SET reaction_type = $1 WHERE post_id = $2 AND user_id = $3', [reactionType, postId, userId]);
+        return res.json({ success: true, message: 'Reação atualizada' });
+      }
+    } else {
+      // Insere nova reação
+      await pool.query(
+        'INSERT INTO social_post_reactions (post_id, user_id, reaction_type) VALUES ($1, $2, $3)',
+        [postId, userId, reactionType]
+      );
+
+      // Cria notificação para o autor do post
+      const postRes = await pool.query('SELECT user_id FROM social_posts WHERE id = $1', [postId]);
+      if (postRes.rows.length > 0 && postRes.rows[0].user_id !== userId) {
+        await pool.query(
+          'INSERT INTO social_notifications (user_id, from_user_id, type, related_id) VALUES ($1, $2, $3, $4)',
+          [postRes.rows[0].user_id, userId, reactionType === 'like' ? 'like' : 'dislike', postId]
+        );
+      }
+
+      return res.status(201).json({ success: true, message: 'Reação registrada' });
+    }
+  } catch (err) {
+    console.error('Erro ao reagir:', err);
+    res.status(500).json({ error: 'Erro ao registrar reação' });
+  }
+});
+
+// --- FOTOS (ÁLBUM) ---
+
+router.post('/photos/upload', validateDBSession, async (req, res) => {
+  const { photoData, description, privacy } = req.body;
+  const userId = req.user.participant_id;
+
+  if (!photoData) {
+    return res.status(400).json({ error: 'Foto é obrigatória' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO social_photos (user_id, photo_data, description, privacy) VALUES ($1, $2, $3, $4) RETURNING *',
+      [userId, photoData, description || '', privacy || 'public']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Erro ao fazer upload de foto:', err);
+    res.status(500).json({ error: 'Erro ao fazer upload' });
+  }
+});
+
+router.post('/photos/:photoId/post-to-feed', validateDBSession, async (req, res) => {
+  const { photoId } = req.params;
+  const userId = req.user.participant_id;
+  const { caption, privacy } = req.body;
+
+  try {
+    // Busca a foto
+    const photoRes = await pool.query('SELECT * FROM social_photos WHERE id = $1 AND user_id = $2', [photoId, userId]);
+    if (photoRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Foto não encontrada' });
+    }
+
+    const photo = photoRes.rows[0];
+
+    // Cria um post no feed com a foto
+    const postRes = await pool.query(
+      'INSERT INTO social_posts (user_id, content, type, privacy, photo_data) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [userId, caption || '', 'feed', privacy || 'public', photo.photo_data]
+    );
+
+    res.json({ success: true, post: postRes.rows[0] });
+  } catch (err) {
+    console.error('Erro ao postar foto:', err);
+    res.status(500).json({ error: 'Erro ao postar foto' });
+  }
+});
+
 router.get('/photos/:userId', validateDBSession, async (req, res) => {
   const targetId = req.params.userId;
+  const currentUserId = req.user.participant_id;
+
   try {
     const result = await pool.query(`
-      SELECT * FROM social_posts 
-      WHERE user_id = $1 AND type = 'photo'
+      SELECT * FROM social_photos 
+      WHERE user_id = $1 
+      AND (privacy = 'public' OR user_id = $2 OR (privacy = 'friends' AND EXISTS (
+        SELECT 1 FROM social_friends f 
+        WHERE (f.requester_id = $2 AND f.target_id = $1 AND f.status = 'accepted')
+        OR (f.target_id = $2 AND f.requester_id = $1 AND f.status = 'accepted')
+      )))
       ORDER BY created_at DESC
-    `, [targetId]);
+    `, [targetId, currentUserId]);
     res.json(result.rows);
   } catch (err) {
+    console.error('Erro ao carregar fotos:', err);
     res.status(500).json({ error: 'Erro ao carregar fotos' });
   }
 });
 
-// --- FIM DAS NOVAS ROTAS ---
+// --- NOTIFICAÇÕES ---
+
+router.get('/notifications', validateDBSession, async (req, res) => {
+  const userId = req.user.participant_id;
+  try {
+    const result = await pool.query(`
+      SELECT n.*, p.name as from_user_name, p.photo as from_user_photo
+      FROM social_notifications n
+      JOIN participants p ON n.from_user_id = p.id
+      WHERE n.user_id = $1
+      ORDER BY n.created_at DESC
+      LIMIT 20
+    `, [userId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Erro ao carregar notificações:', err);
+    res.status(500).json({ error: 'Erro ao carregar notificações' });
+  }
+});
+
+router.post('/notifications/:notificationId/read', validateDBSession, async (req, res) => {
+  const { notificationId } = req.params;
+  try {
+    await pool.query('UPDATE social_notifications SET is_read = TRUE WHERE id = $1', [notificationId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- MATCHES (LISTA E GERENCIAMENTO) ---
+
+router.get('/matches/list', validateDBSession, async (req, res) => {
+  const userId = req.user.participant_id;
+  try {
+    // Matches mútuos
+    const mutualRes = await pool.query(`
+      SELECT p.id, p.name, p.photo, p.age, p.box_id, 'mutual' as match_type
+      FROM social_matches sm
+      JOIN participants p ON (p.id = sm.user_id_2 AND sm.user_id_1 = $1)
+                          OR (p.id = sm.user_id_1 AND sm.user_id_2 = $1)
+      WHERE sm.status = 'mutual_match'
+      AND (sm.user_id_1 = $1 OR sm.user_id_2 = $1)
+      ORDER BY sm.created_at DESC
+    `, [userId]);
+
+    // Likes recebidos (quem deu like em você)
+    const likesReceivedRes = await pool.query(`
+      SELECT p.id, p.name, p.photo, p.age, p.box_id, 'received' as match_type
+      FROM social_matches sm
+      JOIN participants p ON p.id = sm.user_id_1
+      WHERE sm.user_id_2 = $1 AND sm.status = 'matched'
+      ORDER BY sm.created_at DESC
+    `, [userId]);
+
+    // Likes dados (você deu like)
+    const likesSentRes = await pool.query(`
+      SELECT p.id, p.name, p.photo, p.age, p.box_id, 'sent' as match_type
+      FROM social_matches sm
+      JOIN participants p ON p.id = sm.user_id_2
+      WHERE sm.user_id_1 = $1 AND sm.status = 'matched'
+      ORDER BY sm.created_at DESC
+    `, [userId]);
+
+    res.json({
+      mutualMatches: mutualRes.rows,
+      likesReceived: likesReceivedRes.rows,
+      likesSent: likesSentRes.rows
+    });
+  } catch (err) {
+    console.error('Erro ao carregar matches:', err);
+    res.status(500).json({ error: 'Erro ao carregar matches' });
+  }
+});
 
 router.get('/candidates', validateDBSession, async (req, res) => {
   try {
@@ -237,7 +431,6 @@ router.get('/challenges', validateDBSession, async (req, res) => {
   }
 });
 
-// Lista participantes para desafios (com foto)
 router.get('/participants-for-challenges', validateDBSession, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -361,7 +554,6 @@ router.post("/challenges/bulk-delete", validateDBSession, async (req, res) => {
   }
 });
 
-// Perfil público (match mútuo)
 router.get('/public-profile/:id', validateDBSession, async (req, res) => {
   const { id } = req.params;
   const currentUserId = req.user.participant_id;
@@ -406,7 +598,6 @@ router.get('/public-profile/:id', validateDBSession, async (req, res) => {
   }
 });
 
-// Privacidade
 router.post('/privacy/set', validateDBSession, async (req, res) => {
   const { privacy } = req.body;
   if (!['public', 'friends_only', 'private'].includes(privacy)) {
@@ -420,7 +611,6 @@ router.post('/privacy/set', validateDBSession, async (req, res) => {
   }
 });
 
-// Amizades
 router.post('/friend/request', validateDBSession, async (req, res) => {
   const { targetId } = req.body;
   const userId = req.user.participant_id;
