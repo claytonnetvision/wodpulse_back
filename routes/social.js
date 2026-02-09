@@ -63,6 +63,56 @@ router.get('/profile', validateDBSession, async (req, res) => {
     res.status(500).json({ error: err.message }); 
   }
 });
+// --- ROTA DE ESTATÍSTICAS DE PROGRESSO (ADICIONAR ESTE BLOCO) ---
+router.get('/stats/my-progress', validateDBSession, async (req, res) => {
+  const userId = req.user.participant_id;
+  try {
+    // Calcula total de aulas e calorias
+    const sessionsRes = await pool.query(`
+      SELECT COUNT(*) as total_sessions, COALESCE(SUM(sp.calories_total), 0) as total_calories
+      FROM session_participants sp
+      WHERE sp.participant_id = $1
+    `, [userId]);
+
+    const sessions = sessionsRes.rows[0];
+    const totalSessions = parseInt(sessions.total_sessions) || 0;
+    const totalCalories = parseInt(sessions.total_calories) || 0;
+    const avgCalories = totalSessions > 0 ? Math.round(totalCalories / totalSessions) : 0;
+
+    // Calcula FC máxima histórica
+    const maxHRRes = await pool.query(`
+      SELECT COALESCE(MAX(sp.max_hr_reached), 0) as max_hr
+      FROM session_participants sp
+      WHERE sp.participant_id = $1
+    `, [userId]);
+
+    const maxHR = parseInt(maxHRRes.rows[0].max_hr) || 0;
+
+    // Calcula tempo VO2
+    const vo2Res = await pool.query(`
+      SELECT COALESCE(SUM(sp.vo2_time_seconds), 0) as total_vo2_seconds
+      FROM session_participants sp
+      WHERE sp.participant_id = $1
+    `, [userId]);
+
+    const totalVO2Seconds = parseInt(vo2Res.rows[0].total_vo2_seconds) || 0;
+    const totalVO2Minutes = Math.round(totalVO2Seconds / 60);
+
+    res.json({
+      success: true,
+      data: {
+        total_sessions: totalSessions,
+        total_calories: totalCalories,
+        avg_calories: avgCalories,
+        max_hr: maxHR,
+        total_vo2_time: totalVO2Minutes
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao carregar progresso:', err);
+    res.status(500).json({ error: 'Erro ao carregar progresso' });
+  }
+});
 
 // --- POSTS COM SUPORTE A FOTOS ---
 
