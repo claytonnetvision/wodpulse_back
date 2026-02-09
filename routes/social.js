@@ -873,4 +873,3 @@ router.get('/search-users', validateDBSession, async (req, res) => {
 });
 
 module.exports = router;
-//teste colocando inf aqui pra sincronizar
