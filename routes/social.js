@@ -265,8 +265,6 @@ router.get('/photos/:userId', validateDBSession, async (req, res) => {
   }
 });
 
-// --- NOTIFICAÇÕES ---
-
 router.get('/notifications', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
@@ -281,37 +279,21 @@ router.get('/notifications', validateDBSession, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('Erro ao carregar notificações:', err);
-    res.status(500).json({ error: 'Erro ao carregar notificações' });
-  }
-});
-
-router.post('/notifications/:notificationId/read', validateDBSession, async (req, res) => {
-  const { notificationId } = req.params;
-  try {
-    await pool.query('UPDATE social_notifications SET is_read = TRUE WHERE id = $1', [notificationId]);
-    res.json({ success: true });
-  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// --- MATCHES (LISTA E GERENCIAMENTO) ---
-
 router.get('/matches/list', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
-    // Matches mútuos
     const mutualRes = await pool.query(`
       SELECT p.id, p.name, p.photo, p.age, p.box_id, 'mutual' as match_type
       FROM social_matches sm
-      JOIN participants p ON (p.id = sm.user_id_2 AND sm.user_id_1 = $1)
-                          OR (p.id = sm.user_id_1 AND sm.user_id_2 = $1)
-      WHERE sm.status = 'mutual_match'
-      AND (sm.user_id_1 = $1 OR sm.user_id_2 = $1)
+      JOIN participants p ON (p.id = sm.user_id_2 AND sm.user_id_1 = $1) OR (p.id = sm.user_id_1 AND sm.user_id_2 = $1)
+      WHERE sm.status = 'mutual_match' AND (sm.user_id_1 = $1 OR sm.user_id_2 = $1)
       ORDER BY sm.created_at DESC
     `, [userId]);
 
-    // Likes recebidos (quem deu like em você)
     const likesReceivedRes = await pool.query(`
       SELECT p.id, p.name, p.photo, p.age, p.box_id, 'received' as match_type
       FROM social_matches sm
@@ -320,7 +302,6 @@ router.get('/matches/list', validateDBSession, async (req, res) => {
       ORDER BY sm.created_at DESC
     `, [userId]);
 
-    // Likes dados (você deu like)
     const likesSentRes = await pool.query(`
       SELECT p.id, p.name, p.photo, p.age, p.box_id, 'sent' as match_type
       FROM social_matches sm
@@ -335,8 +316,8 @@ router.get('/matches/list', validateDBSession, async (req, res) => {
       likesSent: likesSentRes.rows
     });
   } catch (err) {
-    console.error('Erro ao carregar matches:', err);
-    res.status(500).json({ error: 'Erro ao carregar matches' });
+    console.error('Erro ao carregar lista de matches:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -347,10 +328,13 @@ router.get('/candidates', validateDBSession, async (req, res) => {
       FROM participants 
       WHERE id != $1 
       AND photo IS NOT NULL
-      ORDER BY RANDOM() LIMIT 5
+      ORDER BY RANDOM()
+      LIMIT 5
     `, [req.user.participant_id]);
     res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/match', validateDBSession, async (req, res) => {
@@ -358,6 +342,7 @@ router.post('/match', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
 
   try {
+    // Registra a ação (like ou dislike)
     await pool.query(
       `INSERT INTO social_matches (user_id_1, user_id_2, status)
        VALUES ($1, $2, $3)
@@ -366,13 +351,14 @@ router.post('/match', validateDBSession, async (req, res) => {
     );
 
     if (action === "like") {
+      // Verifica se o outro usuário já deu like
       const reciprocalMatch = await pool.query(
-        `SELECT id FROM social_matches
-         WHERE user_id_1 = $1 AND user_id_2 = $2 AND status = 'matched'`,
+        `SELECT id FROM social_matches WHERE user_id_1 = $1 AND user_id_2 = $2 AND status = 'matched'`,
         [targetId, userId]
       );
 
       if (reciprocalMatch.rows.length > 0) {
+        // Match mútuo!
         await pool.query(
           `UPDATE social_matches SET status = 'mutual_match'
            WHERE (user_id_1 = $1 AND user_id_2 = $2) OR (user_id_1 = $2 AND user_id_2 = $1)`,
@@ -385,12 +371,9 @@ router.post('/match', validateDBSession, async (req, res) => {
 
     res.json({ success: true, message: "Ação registrada." });
   } catch (err) {
-    console.error("Erro ao registrar match:", err);
     res.status(500).json({ error: err.message });
   }
 });
-
-// --- DESAFIOS ---
 
 router.post('/challenge/create', validateDBSession, async (req, res) => {
   const { opponentIds, type, duration } = req.body;
@@ -399,23 +382,28 @@ router.post('/challenge/create', validateDBSession, async (req, res) => {
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: 'Tipo de desafio inválido' });
     }
+
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + parseInt(duration));
+
     for (const oppId of opponentIds) {
-      await pool.query('INSERT INTO social_challenges (creator_id, opponent_id, challenge_type, end_date, status) VALUES ($1, $2, $3, $4, $5)', [req.user.participant_id, oppId, type, endDate, 'pending']);
+      await pool.query(
+        'INSERT INTO social_challenges (creator_id, opponent_id, challenge_type, end_date, status) VALUES ($1, $2, $3, $4, $5)',
+        [req.user.participant_id, oppId, type, endDate, 'pending']
+      );
     }
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.get('/challenges', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
     const result = await pool.query(`
-      SELECT 
-        c.id, c.challenge_type, c.end_date, c.created_at, c.status, c.response_message,
-        c.creator_id, c.opponent_id,
-        p1.name as creator_name, p1.photo as creator_photo,
+      SELECT c.id, c.challenge_type, c.end_date, c.created_at, c.status, c.response_message,
+        c.creator_id, c.opponent_id, p1.name as creator_name, p1.photo as creator_photo,
         p2.name as opponent_name, p2.photo as opponent_photo
       FROM social_challenges c
       JOIN participants p1 ON c.creator_id = p1.id
@@ -423,10 +411,9 @@ router.get('/challenges', validateDBSession, async (req, res) => {
       WHERE c.creator_id = $1 OR c.opponent_id = $1
       ORDER BY c.created_at DESC
     `, [userId]);
-
     res.json({ success: true, challenges: result.rows });
   } catch (err) {
-    console.error("Erro ao buscar desafios:", err);
+    console.error("Erro ao carregar desafios:", err);
     res.status(500).json({ error: "Erro interno ao carregar desafios." });
   }
 });
@@ -436,13 +423,12 @@ router.get('/participants-for-challenges', validateDBSession, async (req, res) =
     const result = await pool.query(`
       SELECT id, name, photo 
       FROM participants 
-      WHERE id != $1 AND photo IS NOT NULL
+      WHERE id != $1 
+      AND photo IS NOT NULL
       ORDER BY name ASC
     `, [req.user.participant_id]);
-
     res.json({ success: true, participants: result.rows });
   } catch (err) {
-    console.error('Erro ao listar participantes para desafios:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -451,21 +437,14 @@ router.get("/mutual-matches", validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
     const result = await pool.query(
-      `SELECT
-          p.id, p.name, p.photo, p.age, p.box_id
-       FROM
-          social_matches sm
-       JOIN
-          participants p ON (p.id = sm.user_id_2 AND sm.user_id_1 = $1)
-                       OR (p.id = sm.user_id_1 AND sm.user_id_2 = $1)
-       WHERE
-          sm.status = 'mutual_match'
-          AND (sm.user_id_1 = $1 OR sm.user_id_2 = $1)`,
+      `SELECT p.id, p.name, p.photo, p.age, p.box_id
+       FROM social_matches sm
+       JOIN participants p ON (p.id = sm.user_id_2 AND sm.user_id_1 = $1) OR (p.id = sm.user_id_1 AND sm.user_id_2 = $1)
+       WHERE sm.status = 'mutual_match' AND (sm.user_id_1 = $1 OR sm.user_id_2 = $1)`,
       [userId]
     );
     res.json({ success: true, matches: result.rows });
   } catch (err) {
-    console.error("Erro ao buscar matches mútuos:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -477,7 +456,7 @@ router.post("/challenge/:id/respond", validateDBSession, async (req, res) => {
 
   try {
     const challengeRes = await pool.query(
-      "SELECT creator_id, opponent_id FROM social_challenges WHERE id = $1",
+      "SELECT opponent_id FROM social_challenges WHERE id = $1",
       [challengeId]
     );
 
@@ -486,19 +465,17 @@ router.post("/challenge/:id/respond", validateDBSession, async (req, res) => {
     }
 
     if (challengeRes.rows[0].opponent_id !== userId) {
-      return res.status(403).json({ error: "Você não é o oponente deste desafio." });
+      return res.status(403).json({ error: "Acesso negado." });
     }
 
     const newStatus = action === 'accept' ? 'accepted' : 'rejected';
-
     await pool.query(
       "UPDATE social_challenges SET status = $1, response_message = $2 WHERE id = $3",
       [newStatus, message, challengeId]
     );
 
-    res.json({ success: true, message: `Desafio ${newStatus} com sucesso!` });
+    res.json({ success: true, message: `Desafio ${newStatus}!` });
   } catch (err) {
-    console.error("Erro ao responder desafio:", err);
     res.status(500).json({ error: err.message });
   }
 });
