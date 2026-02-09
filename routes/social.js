@@ -658,7 +658,9 @@ router.get('/public-profile/:id', validateDBSession, async (req, res) => {
     // Se for o próprio usuário, redireciona ou retorna erro (opcional)
   }
 
-  try {
+    try {
+    // COMENTADO PARA LIBERAR ACESSO PÚBLICO
+    /*
     const matchCheck = await pool.query(`
       SELECT 1 FROM social_matches 
       WHERE status = 'mutual_match' 
@@ -668,8 +670,10 @@ router.get('/public-profile/:id', validateDBSession, async (req, res) => {
     if (matchCheck.rows.length === 0) {
       return res.status(403).json({ error: 'Acesso negado – apenas matches mútuos' });
     }
+    */
 
     const userRes = await pool.query(`
+
       SELECT id, name, photo, age, box_id, bio, cover_photo 
       FROM participants 
       WHERE id = $1
