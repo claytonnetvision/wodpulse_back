@@ -44,7 +44,7 @@ router.post('/login', async (req, res) => {
 
 router.get('/profile', validateDBSession, async (req, res) => {
   try {
-    const userRes = await pool.query('SELECT id, name, photo, box_id, progress_privacy FROM participants WHERE id = $1', [req.user.participant_id]);
+    const userRes = await pool.query('SELECT id, name, photo, box_id, progress_privacy, bio, cover_photo FROM participants WHERE id = $1', [req.user.participant_id]);
     const user = userRes.rows[0];
     
     const statsRes = await pool.query(`
@@ -63,6 +63,88 @@ router.get('/profile', validateDBSession, async (req, res) => {
     res.status(500).json({ error: err.message }); 
   }
 });
+
+// --- NOVAS ROTAS DE REDE SOCIAL (FEED, SCRAPS, FOTOS) ---
+
+// Criar Postagem ou Scrap
+router.post('/posts', validateDBSession, async (req, res) => {
+  const { content, type, privacy, targetUserId } = req.body;
+  const userId = req.user.participant_id;
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO social_posts (user_id, content, type, privacy, target_user_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [userId, content, type || 'feed', privacy || 'public', targetUserId || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Erro ao criar postagem:', err);
+    res.status(500).json({ error: 'Erro ao criar postagem' });
+  }
+});
+
+// Buscar Feed (Meus posts + Amigos + Públicos)
+router.get('/feed', validateDBSession, async (req, res) => {
+  const userId = req.user.participant_id;
+  try {
+    const result = await pool.query(`
+      SELECT p.*, u.name as user_name, u.photo as user_photo 
+      FROM social_posts p
+      JOIN participants u ON p.user_id = u.id
+      WHERE p.type = 'feed' 
+      AND (
+        p.user_id = $1 
+        OR p.privacy = 'public' 
+        OR (p.privacy = 'friends' AND EXISTS (
+          SELECT 1 FROM social_friends f 
+          WHERE (f.requester_id = $1 AND f.target_id = p.user_id AND f.status = 'accepted')
+          OR (f.target_id = $1 AND f.requester_id = p.user_id AND f.status = 'accepted')
+        ))
+      )
+      ORDER BY p.created_at DESC
+      LIMIT 50
+    `, [userId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Erro ao carregar feed:', err);
+    res.status(500).json({ error: 'Erro ao carregar feed' });
+  }
+});
+
+// Buscar Scraps de um usuário
+router.get('/scraps/:userId', validateDBSession, async (req, res) => {
+  const targetId = req.params.userId;
+  try {
+    const result = await pool.query(`
+      SELECT p.*, u.name as user_name, u.photo as user_photo 
+      FROM social_posts p
+      JOIN participants u ON p.user_id = u.id
+      WHERE p.type = 'scrap' AND p.target_user_id = $1
+      ORDER BY p.created_at DESC
+    `, [targetId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Erro ao carregar scraps:', err);
+    res.status(500).json({ error: 'Erro ao carregar scraps' });
+  }
+});
+
+// Buscar Fotos (Posts que podem ser considerados do álbum)
+router.get('/photos/:userId', validateDBSession, async (req, res) => {
+  const targetId = req.params.userId;
+  try {
+    const result = await pool.query(`
+      SELECT * FROM social_posts 
+      WHERE user_id = $1 AND type = 'photo'
+      ORDER BY created_at DESC
+    `, [targetId]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao carregar fotos' });
+  }
+});
+
+// --- FIM DAS NOVAS ROTAS ---
 
 router.get('/candidates', validateDBSession, async (req, res) => {
   try {
@@ -285,7 +367,7 @@ router.get('/public-profile/:id', validateDBSession, async (req, res) => {
   const currentUserId = req.user.participant_id;
 
   if (parseInt(id) === currentUserId) {
-    return res.status(400).json({ error: 'Use /profile para o próprio perfil' });
+    // Se for o próprio usuário, redireciona ou retorna erro (opcional)
   }
 
   try {
@@ -300,7 +382,7 @@ router.get('/public-profile/:id', validateDBSession, async (req, res) => {
     }
 
     const userRes = await pool.query(`
-      SELECT id, name, photo, age, box_id 
+      SELECT id, name, photo, age, box_id, bio, cover_photo 
       FROM participants 
       WHERE id = $1
     `, [id]);
@@ -309,7 +391,15 @@ router.get('/public-profile/:id', validateDBSession, async (req, res) => {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
 
-    res.json(userRes.rows[0]);
+    const user = userRes.rows[0];
+    const statsRes = await pool.query(`
+      SELECT 
+        (SELECT COUNT(*) FROM social_challenges WHERE creator_id = $1 OR opponent_id = $1) as challenges,
+        (SELECT COUNT(*) FROM social_matches WHERE user_id_1 = $1 AND status = 'matched') as likes,
+        (SELECT COUNT(*) FROM social_matches WHERE (user_id_1 = $1 OR user_id_2 = $1) AND status = 'mutual_match') as matches
+    `, [id]);
+
+    res.json({ ...user, stats: statsRes.rows[0] });
   } catch (err) {
     console.error('Erro public-profile:', err);
     res.status(500).json({ error: 'Erro interno' });
@@ -368,13 +458,9 @@ router.post('/friend/respond', validateDBSession, async (req, res) => {
   }
 });
 
-// ===== ENDPOINT /friends AJUSTADO PARA SUA TABELA social_friends =====
-// Retorna pendingRequests (pedidos recebidos) e confirmedFriends (amigos aceitos)
-// Compatível com o frontend que eu enviei (perfil-social.html)
 router.get('/friends', validateDBSession, async (req, res) => {
   const userId = req.user.participant_id;
   try {
-    // Pedidos pendentes recebidos (eu sou target_id)
     const pendingRes = await pool.query(`
       SELECT p.id, p.name, p.photo 
       FROM social_friends f 
@@ -383,7 +469,6 @@ router.get('/friends', validateDBSession, async (req, res) => {
       ORDER BY f.created_at DESC
     `, [userId]);
 
-    // Amigos confirmados (bidirecional, status 'accepted')
     const friendsRes = await pool.query(`
       SELECT p.id, p.name, p.photo
       FROM social_friends f 
@@ -445,7 +530,6 @@ router.post("/challenge/:id/result", validateDBSession, async (req, res) => {
   }
 });
 
-// Calorias automáticas
 router.get('/challenge/:id/calories-summary', validateDBSession, async (req, res) => {
   const challengeId = parseInt(req.params.id);
   const userId = req.user.participant_id;
@@ -516,6 +600,7 @@ router.get("/challenge/:id/ranking", validateDBSession, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 router.post('/profile/update', validateDBSession, async (req, res) => {
   const { bio, cover_photo } = req.body;
   try {
@@ -529,7 +614,7 @@ router.post('/profile/update', validateDBSession, async (req, res) => {
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-// *** NOVO ENDPOINT DE BUSCA ***
+
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
   if (!q || q.trim().length < 2) return res.json({ users: [] });
