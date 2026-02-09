@@ -76,16 +76,21 @@ router.post('/posts', validateDBSession, async (req, res) => {
       [userId, content, type || 'feed', privacy || 'public', targetUserId || null, photoData || null]
     );
     
-    // Processar menções (@username)
-    const mentions = content.match(/@(\w+)/g) || [];
-    for (const mention of mentions) {
-      const username = mention.substring(1);
-      const mentionedUserRes = await pool.query('SELECT id FROM participants WHERE LOWER(name) LIKE LOWER($1) LIMIT 1', [`%${username}%`]);
-      if (mentionedUserRes.rows.length > 0) {
-        await pool.query(
-          'INSERT INTO social_notifications (user_id, from_user_id, type, related_id) VALUES ($1, $2, $3, $4)',
-          [mentionedUserRes.rows[0].id, userId, 'mention', result.rows[0].id]
+    // Processar menções (@username) - Melhorado
+    if (content) {
+      const mentions = content.match(/@([\w\u00C0-\u017F]+)/g) || [];
+      for (const mention of mentions) {
+        const username = mention.substring(1);
+        const mentionedUserRes = await pool.query(
+          'SELECT id FROM participants WHERE LOWER(name) LIKE LOWER($1) OR LOWER(name) LIKE LOWER($2) LIMIT 1',
+          [`${username}%`, `% ${username}%`]
         );
+        if (mentionedUserRes.rows.length > 0) {
+          await pool.query(
+            'INSERT INTO social_notifications (user_id, from_user_id, type, related_id) VALUES ($1, $2, $3, $4)',
+            [mentionedUserRes.rows[0].id, userId, 'mention', result.rows[0].id]
+          );
+        }
       }
     }
 
@@ -93,6 +98,39 @@ router.post('/posts', validateDBSession, async (req, res) => {
   } catch (err) {
     console.error('Erro ao criar postagem:', err);
     res.status(500).json({ error: 'Erro ao criar postagem' });
+  }
+});
+
+// --- EXCLUIR POSTAGEM ---
+
+router.delete('/posts/:postId', validateDBSession, async (req, res) => {
+  const { postId } = req.params;
+  const userId = req.user.participant_id;
+
+  try {
+    // Verifica se o post existe e se pertence ao usuário
+    const postRes = await pool.query('SELECT user_id FROM social_posts WHERE id = $1', [postId]);
+    if (postRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Postagem não encontrada' });
+    }
+
+    if (postRes.rows[0].user_id !== userId) {
+      return res.status(403).json({ error: 'Você não tem permissão para excluir esta postagem' });
+    }
+
+    // Deleta as reações associadas
+    await pool.query('DELETE FROM social_post_reactions WHERE post_id = $1', [postId]);
+
+    // Deleta as notificações associadas
+    await pool.query('DELETE FROM social_notifications WHERE related_id = $1 AND type IN ($2, $3, $4)', [postId, 'mention', 'like', 'dislike']);
+
+    // Deleta a postagem
+    await pool.query('DELETE FROM social_posts WHERE id = $1', [postId]);
+
+    res.json({ success: true, message: 'Postagem excluída com sucesso' });
+  } catch (err) {
+    console.error('Erro ao excluir postagem:', err);
+    res.status(500).json({ error: 'Erro ao excluir postagem' });
   }
 });
 
@@ -119,7 +157,12 @@ router.get('/feed', validateDBSession, async (req, res) => {
       ORDER BY p.created_at DESC
       LIMIT 50
     `, [userId]);
-    res.json(result.rows);
+    // Adiciona flag de autoria para o frontend saber se pode deletar
+    const resultWithAuth = result.rows.map(post => ({
+      ...post,
+      isAuthor: post.user_id === userId
+    }));
+    res.json(resultWithAuth);
   } catch (err) {
     console.error('Erro ao carregar feed:', err);
     res.status(500).json({ error: 'Erro ao carregar feed' });
@@ -128,6 +171,7 @@ router.get('/feed', validateDBSession, async (req, res) => {
 
 router.get('/scraps/:userId', validateDBSession, async (req, res) => {
   const targetId = req.params.userId;
+  const currentUserId = req.user.participant_id;
   try {
     const result = await pool.query(`
       SELECT p.*, u.name as user_name, u.photo as user_photo 
@@ -136,7 +180,12 @@ router.get('/scraps/:userId', validateDBSession, async (req, res) => {
       WHERE p.type = 'scrap' AND p.target_user_id = $1
       ORDER BY p.created_at DESC
     `, [targetId]);
-    res.json(result.rows);
+    // Adiciona flag de autoria para o frontend saber se pode deletar
+    const resultWithAuth = result.rows.map(post => ({
+      ...post,
+      isAuthor: post.user_id === currentUserId
+    }));
+    res.json(resultWithAuth);
   } catch (err) {
     console.error('Erro ao carregar scraps:', err);
     res.status(500).json({ error: 'Erro ao carregar scraps' });
@@ -144,6 +193,26 @@ router.get('/scraps/:userId', validateDBSession, async (req, res) => {
 });
 
 // --- SISTEMA DE REAÇÕES (CURTIR/NÃO CURTIR) ---
+
+// --- NOTIFICAÇÕES ---
+
+router.get('/notifications', validateDBSession, async (req, res) => {
+  const userId = req.user.participant_id;
+  try {
+    const result = await pool.query(`
+      SELECT n.*, p.name as from_user_name, p.photo as from_user_photo
+      FROM social_notifications n
+      JOIN participants p ON n.from_user_id = p.id
+      WHERE n.user_id = $1
+      ORDER BY n.created_at DESC
+      LIMIT 20
+    `, [userId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Erro ao carregar notificações:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.post('/posts/:postId/react', validateDBSession, async (req, res) => {
   const { postId } = req.params;
