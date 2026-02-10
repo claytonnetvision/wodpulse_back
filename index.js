@@ -7,7 +7,8 @@ const app = express();
 const port = process.env.PORT || 3001;
 const { gerarAnaliseGemini } = require('./utils/gemini'); // ajuste o caminho
 const socialRouter = require('./routes/social');
-const challengeRoutes = require('./routes/challenges')(pool); 
+const challengeRoutes = require('./routes/challenges');
+
 
 
 // Middleware CORS manual (mais robusto no Render)
