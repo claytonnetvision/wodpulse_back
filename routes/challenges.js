@@ -1,23 +1,35 @@
 const express = require("express");
 const router = express.Router();
-const jwt = require("jsonwebtoken");
 
 module.exports = function(pool) {
-  const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers["authorization"];
-    const token = authHeader && authHeader.split(" ")[1];
-    if (token == null) return res.sendStatus(401);
-
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-      if (err) return res.sendStatus(403);
-      req.user = user;
+  // Middleware de Autenticação Interno (Cópia fiel do seu social.js)
+  const validateDBSession = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (!token) return res.status(401).json({ error: 'Token não fornecido' });
+    
+    try {
+      const result = await pool.query(`
+        SELECT s.*, p.id as participant_id, p.name, p.box_id 
+        FROM social_sessions s
+        JOIN participants p ON s.participant_id = p.id
+        WHERE s.session_token = $1 AND s.expires_at > NOW()
+        LIMIT 1
+      `, [token]);
+      
+      if (result.rows.length === 0) return res.status(401).json({ error: 'Sessão inválida' });
+      
+      req.user = result.rows[0];
       next();
-    });
+    } catch (err) {
+      res.status(500).json({ error: 'Erro de auth interno' });
+    }
   };
 
-  router.post("/create", authenticateToken, async (req, res) => {
+  router.post("/create", validateDBSession, async (req, res) => {
     const { title, startDate, endDate, invitedParticipants } = req.body;
-    const creatorId = req.user.id;
+    const creatorId = req.user.participant_id;
 
     console.log(`[CHALLENGE DEBUG] Iniciando criação: "${title}" por usuário ${creatorId}`);
 
@@ -58,7 +70,7 @@ module.exports = function(pool) {
     }
   });
 
-  router.get("/top-calories", authenticateToken, async (req, res) => {
+  router.get("/top-calories", validateDBSession, async (req, res) => {
     const { days } = req.query;
     let interval = '1 day';
     if (days === '3') interval = '3 days';
@@ -86,8 +98,8 @@ module.exports = function(pool) {
     }
   });
 
-  router.get("/my-challenges", authenticateToken, async (req, res) => {
-    const userId = req.user.id;
+  router.get("/my-challenges", validateDBSession, async (req, res) => {
+    const userId = req.user.participant_id;
     console.log(`[CHALLENGE DEBUG] Buscando desafios para o usuário ${userId}`);
     try {
       const result = await pool.query(
@@ -106,8 +118,8 @@ module.exports = function(pool) {
     }
   });
 
-  router.get("/notifications", authenticateToken, async (req, res) => {
-    const userId = req.user.id;
+  router.get("/notifications", validateDBSession, async (req, res) => {
+    const userId = req.user.participant_id;
     console.log(`[CHALLENGE DEBUG] Buscando notificações para o usuário ${userId}`);
     try {
       const result = await pool.query(
@@ -126,10 +138,10 @@ module.exports = function(pool) {
     }
   });
 
-  router.post("/:id/respond", authenticateToken, async (req, res) => {
+  router.post("/:id/respond", validateDBSession, async (req, res) => {
     const { action } = req.body;
     const challengeId = req.params.id;
-    const userId = req.user.id;
+    const userId = req.user.participant_id;
     console.log(`[CHALLENGE DEBUG] Respondendo ao desafio ${challengeId}: ${action}`);
 
     try {
@@ -145,9 +157,9 @@ module.exports = function(pool) {
     }
   });
 
-  router.post("/:id/start", authenticateToken, async (req, res) => {
+  router.post("/:id/start", validateDBSession, async (req, res) => {
     const challengeId = req.params.id;
-    const userId = req.user.id;
+    const userId = req.user.participant_id;
     console.log(`[CHALLENGE DEBUG] Iniciando desafio ${challengeId} pelo usuário ${userId}`);
 
     try {
@@ -168,9 +180,9 @@ module.exports = function(pool) {
     }
   });
 
-  router.delete("/:id", authenticateToken, async (req, res) => {
+  router.delete("/:id", validateDBSession, async (req, res) => {
     const challengeId = req.params.id;
-    const userId = req.user.id;
+    const userId = req.user.participant_id;
     console.log(`[CHALLENGE DEBUG] Excluindo desafio ${challengeId} pelo usuário ${userId}`);
 
     try {
@@ -191,7 +203,7 @@ module.exports = function(pool) {
     }
   });
 
-  router.get("/:id/ranking", authenticateToken, async (req, res) => {
+  router.get("/:id/ranking", validateDBSession, async (req, res) => {
     const challengeId = req.params.id;
     console.log(`[CHALLENGE DEBUG] Obtendo ranking do desafio ${challengeId}`);
     try {
