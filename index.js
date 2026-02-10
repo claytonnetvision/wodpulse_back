@@ -7,6 +7,7 @@ const app = express();
 const port = process.env.PORT || 3001;
 const { gerarAnaliseGemini } = require('./utils/gemini'); // ajuste o caminho
 const socialRouter = require('./routes/social');
+const challengeRoutes = require('./routes/challenges');
 
 // Middleware CORS manual (mais robusto no Render)
 app.use((req, res, next) => {
@@ -896,6 +897,7 @@ Data da aula de hoje: ${classDate}`
   }
 });
 app.use('/api/social', socialRouter);
+app.use('/api/challenges', challengeRoutes);
 
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);
