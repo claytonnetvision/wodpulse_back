@@ -3,7 +3,6 @@ const router = express.Router();
 const jwt = require("jsonwebtoken");
 
 module.exports = function(pool) {
-  // Middleware para verificar o token JWT
   const authenticateToken = (req, res, next) => {
     const authHeader = req.headers["authorization"];
     const token = authHeader && authHeader.split(" ")[1];
@@ -16,10 +15,11 @@ module.exports = function(pool) {
     });
   };
 
-  // Rota para criar um novo desafio
   router.post("/create", authenticateToken, async (req, res) => {
     const { title, startDate, endDate, invitedParticipants } = req.body;
     const creatorId = req.user.id;
+
+    console.log(`[CHALLENGE] Criando desafio: "${title}" por usuário ${creatorId}`);
 
     if (!title || !startDate || !endDate || !invitedParticipants || invitedParticipants.length === 0) {
       return res.status(400).json({ error: "Dados incompletos para criar o desafio." });
@@ -45,10 +45,37 @@ module.exports = function(pool) {
         );
       }
 
+      console.log(`[CHALLENGE] Desafio ${challengeId} criado com sucesso.`);
       res.status(201).json({ success: true, challengeId });
     } catch (err) {
-      console.error("Erro ao criar desafio:", err);
+      console.error("[CHALLENGE] Erro ao criar desafio:", err);
       res.status(500).json({ error: "Erro interno do servidor ao criar desafio." });
+    }
+  });
+
+  router.get("/top-calories", authenticateToken, async (req, res) => {
+    const { days } = req.query;
+    let interval = '1 day';
+    if (days === '3') interval = '3 days';
+    if (days === '7') interval = '7 days';
+
+    console.log(`[CHALLENGE] Buscando Top Calorias para os últimos ${interval}`);
+
+    try {
+      const result = await pool.query(
+        `SELECT p.id, p.name, p.photo, SUM(sp.calories_total) as total_calories
+         FROM session_participants sp
+         JOIN sessions s ON sp.session_id = s.id
+         JOIN participants p ON sp.participant_id = p.id
+         WHERE s.date_start >= NOW() - INTERVAL '${interval}'
+         GROUP BY p.id, p.name, p.photo
+         ORDER BY total_calories DESC
+         LIMIT 5`
+      );
+      res.json(result.rows);
+    } catch (err) {
+      console.error("[CHALLENGE] Erro ao buscar top calorias:", err);
+      res.status(500).json({ error: "Erro ao buscar ranking." });
     }
   });
 
@@ -154,8 +181,7 @@ module.exports = function(pool) {
           `SELECT SUM(sp.calories_total) as total_calories 
            FROM session_participants sp 
            JOIN sessions s ON sp.session_id = s.id 
-           JOIN participants part ON sp.participant_id = part.id
-           WHERE part.id = $1 AND s.date_start BETWEEN $2 AND $3`,
+           WHERE sp.participant_id = $1 AND s.date_start BETWEEN $2 AND $3`,
           [p.id, challenge.rows[0].start_date, challenge.rows[0].end_date]
         );
         ranking.push({
@@ -170,29 +196,6 @@ module.exports = function(pool) {
       res.json({ challenge: challenge.rows[0], ranking });
     } catch (err) {
       res.status(500).json({ error: "Erro ao obter ranking." });
-    }
-  });
-
-  router.get("/top-calories", authenticateToken, async (req, res) => {
-    const { days } = req.query;
-    let dateFilter = '1 day';
-    if (days === '3') dateFilter = '3 days';
-    if (days === '7') dateFilter = '7 days';
-
-    try {
-      const topCalories = await pool.query(
-        `SELECT p.id, p.name, p.photo, SUM(sp.calories_total) AS total_calories
-         FROM session_participants sp
-         JOIN sessions s ON sp.session_id = s.id
-         JOIN participants p ON sp.participant_id = p.id
-         WHERE s.date_start >= NOW() - INTERVAL '${dateFilter}'
-         GROUP BY p.id, p.name, p.photo
-         ORDER BY total_calories DESC
-         LIMIT 5`
-      );
-      res.json(topCalories.rows);
-    } catch (err) {
-      res.status(500).json({ error: "Erro ao obter top calorias." });
     }
   });
 
