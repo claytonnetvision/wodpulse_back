@@ -7,7 +7,11 @@ module.exports = function(pool) {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
     
-    if (!token) return res.status(401).json({ error: 'Token não fornecido' });
+    console.log('[CHALLENGE AUTH] Tentando autenticar sessão...');
+    if (!token) {
+      console.log('[CHALLENGE AUTH] Erro: Token não fornecido.');
+      return res.status(401).json({ error: 'Token não fornecido' });
+    }
     
     try {
       const result = await pool.query(`
@@ -18,11 +22,16 @@ module.exports = function(pool) {
         LIMIT 1
       `, [token]);
       
-      if (result.rows.length === 0) return res.status(401).json({ error: 'Sessão inválida' });
+      if (result.rows.length === 0) {
+        console.log('[CHALLENGE AUTH] Erro: Sessão inválida ou expirada.');
+        return res.status(401).json({ error: 'Sessão inválida' });
+      }
+      console.log(`[CHALLENGE AUTH] Sessão válida para participant_id: ${result.rows[0].participant_id}`);
       
       req.user = result.rows[0];
       next();
     } catch (err) {
+      console.error('[CHALLENGE AUTH] Erro interno de autenticação:', err);
       res.status(500).json({ error: 'Erro de auth interno' });
     }
   };
@@ -218,22 +227,30 @@ module.exports = function(pool) {
         [challengeId]
       );
 
-      const ranking = [];
-      for (const p of participants.rows) {
-        const stats = await pool.query(
-          `SELECT SUM(sp.calories_total) as total_calories 
-           FROM session_participants sp 
-           JOIN sessions s ON sp.session_id = s.id 
-           WHERE sp.participant_id = $1 AND s.date_start BETWEEN $2 AND $3`,
-          [p.id, challenge.rows[0].start_date, challenge.rows[0].end_date]
+      const participantIds = participants.rows.map(p => p.id);
+
+      let rankingStats = [];
+      if (participantIds.length > 0) {
+        const statsResult = await pool.query(
+          `SELECT sp.participant_id as id, SUM(sp.calories_total) as total_calories
+           FROM session_participants sp
+           JOIN sessions s ON sp.session_id = s.id
+           WHERE sp.participant_id = ANY($1::int[]) AND s.date_start BETWEEN $2 AND $3
+           GROUP BY sp.participant_id`,
+          [participantIds, challenge.rows[0].start_date, challenge.rows[0].end_date]
         );
-        ranking.push({
+        rankingStats = statsResult.rows;
+      }
+
+      const ranking = participants.rows.map(p => {
+        const stats = rankingStats.find(s => s.id === p.id);
+        return {
           id: p.id,
           name: p.name,
           photo: p.photo,
-          total_calories: parseFloat(stats.rows[0].total_calories) || 0
-        });
-      }
+          total_calories: parseFloat(stats?.total_calories || 0)
+        };
+      });
 
       ranking.sort((a, b) => b.total_calories - a.total_calories);
       console.log(`[CHALLENGE DEBUG] Ranking calculado para ${ranking.length} participantes.`);
