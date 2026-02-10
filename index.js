@@ -896,8 +896,9 @@ Data da aula de hoje: ${classDate}`
     });
   }
 });
-app.use('/api/social', socialRouter);
 app.use('/api/challenges', challengeRoutes);
+app.use('/api/social', socialRouter);
+
 
 app.listen(port, () => {
   console.log(`Backend rodando → http://0.0.0.0:${port}`);
