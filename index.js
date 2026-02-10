@@ -54,6 +54,14 @@ pool.connect()
   .then(() => console.log('→ Conectado ao PostgreSQL (Neon)'))
   .catch(err => console.error('Erro ao conectar no banco:', err.stack));
 
+// ADICIONE ESTE BLOCO AQUI:
+app.use((req, res, next) => {
+  if (req.url.includes('/api/challenges')) {
+    console.log(`[INDEX DEBUG] Requisição recebida: ${req.method} ${req.url}`);
+  }
+  next();
+});
+
 setInterval(async () => {
   try {
     await pool.query('SELECT 1');
