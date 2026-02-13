@@ -78,7 +78,7 @@ app.get('/', (req, res) => {
 });
 
 
-// --- BLOCO DE REGISTRO DE ROTAS (VERSÃO FINAL CORRIGIDA) ---
+// --- BLOCO DE REGISTRO DE ROTAS (VERSÃO FINALÍSSIMA CORRIGIDA) ---
 
 const bodyProgressRouter = require('./routes/body-progress');
 
@@ -87,8 +87,31 @@ app.use('/api/auth', require('./routes/auth'));
 
 // 2. Rotas PÚBLICAS para o link do e-mail
 app.use('/api/public/participants', require('./routes/public-participants'));
-// A rota pública para body-progress agora é tratada aqui, sem proteção
-app.get('/api/public/body-progress', bodyProgressRouter);
+
+// ROTA PÚBLICA EXPLÍCITA PARA BODY PROGRESS
+app.get('/api/public/body-progress', async (req, res) => {
+    const { alunoId } = req.query;
+    if (!alunoId) {
+        return res.status(400).json({ error: 'alunoId obrigatório' });
+    }
+    try {
+        const result = await pool.query(
+            `SELECT id, date, measures, photos, analysis FROM body_progress WHERE participant_id = $1 ORDER BY date DESC`,
+            [alunoId]
+        );
+        const progress = result.rows.map(row => ({
+            id: row.id,
+            date: row.date.toISOString().split('T')[0],
+            measures: row.measures || {},
+            photos: row.photos || [],
+            analysis: row.analysis || null
+        }));
+        res.json(progress);
+    } catch (err) {
+        console.error('Erro ao buscar body_progress (público):', err.stack);
+        res.status(500).json({ error: 'Erro ao buscar progresso corporal' });
+    }
+});
 
 // 3. Rotas de Super Admin (protegidas)
 app.use('/api/superadmin', authenticateSuperAdmin, require('./routes/superadmin'));
