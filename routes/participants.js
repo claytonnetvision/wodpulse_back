@@ -272,5 +272,6 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ error: 'Erro ao excluir aluno' });
   }
 });
+module.exports.getParticipantById = getParticipantById;
 
 module.exports = router;

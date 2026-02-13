@@ -9,7 +9,7 @@ const { gerarAnaliseGemini } = require('./utils/gemini');
 const socialRouter = require('./routes/social');
 const challengeRoutes = require('./routes/challenges');
 
-// --- AJUSTE 1: Importando os dois middlewares no topo ---
+// --- Importando os middlewares no topo ---
 const authenticateMiddleware = require('./routes/middleware/auth');
 const { authenticateSuperAdmin } = require('./routes/middleware/superAdminAuth');
 
@@ -77,27 +77,42 @@ app.get('/', (req, res) => {
   });
 });
 
-// --- AJUSTE 2: Bloco de registro de rotas CORRIGIDO e REORGANIZADO ---
 
-// 1. Rota de login do instrutor (pública, sem middleware)
+// --- BLOCO DE REGISTRO DE ROTAS AJUSTADO ---
+
+// 1. Rota de login do instrutor (pública)
 app.use('/api/auth', require('./routes/auth'));
 
-// 2. Rotas de Super Admin (protegidas pelo middleware específico)
+// 2. Rota PÚBLICA para buscar detalhes de um participante (para o link do e-mail)
+// Esta rota é específica e não tem proteção de instrutor
+const publicParticipantRouter = express.Router();
+const participantsController = require('./routes/participants'); // Importamos o controller
+// Usamos a função específica do controller para a rota pública
+publicParticipantRouter.get('/:id', participantsController.getParticipantById);
+app.use('/api/participants', publicParticipantRouter);
+
+
+// 3. Rotas de Super Admin (protegidas)
 app.use('/api/superadmin', authenticateSuperAdmin, require('./routes/superadmin'));
 
-// 3. Rotas de Instrutor (protegidas pelo middleware normal)
-// O middleware é aplicado e o router é chamado na mesma linha.
+// 4. Rotas de Instrutor (protegidas)
+// Note que a rota de participants aqui não precisa mais do GET /:id
 app.use('/api/participants', authenticateMiddleware, require('./routes/participants'));
 app.use('/api/body-progress', authenticateMiddleware, require('./routes/body-progress'));
+app.post('/api/ai-analyze-body-progress', authenticateMiddleware);
+app.get('/api/participants/ranking-acumulado', authenticateMiddleware);
+app.get('/api/sessions/historico', authenticateMiddleware);
 
-// 4. Rotas de Sessões (protegidas pelo middleware normal)
-// O middleware é aplicado a todas as rotas definidas em `sessionsRouter`
+// 5. Rotas de Sessões (protegidas)
 const sessionsRouter = express.Router();
 app.use('/api/sessions', authenticateMiddleware, sessionsRouter);
 
-// 5. Rotas de Social e Challenges (lógica de autenticação própria, sem nosso middleware)
+// 6. Rotas de Social e Challenges (lógica própria)
 app.use('/api/social', socialRouter);
 app.use('/api/challenges', challengeRoutes);
+
+// --- FIM DO BLOCO DE REGISTRO ---
+
 
 // --- FIM DO AJUSTE ---
 
