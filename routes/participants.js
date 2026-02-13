@@ -43,36 +43,7 @@ router.get('/', async (req, res) => {
 
 // GET individual
 // GET individual
-router.get('/:id', async (req, res) => {
-  const { id } = req.params;
-  // NÃO precisamos do boxId aqui, pois esta rota será pública.
 
-  try {
-    // A query volta a ser como era originalmente, buscando apenas pelo ID do aluno.
-    const result = await pool.query(
-      `SELECT id, name, name_lower, age, weight, height_cm, gender, resting_hr, email,
-              use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout,
-              created_at, updated_at
-       FROM participants WHERE id = $1`,
-      [id] // Passamos apenas o ID do aluno.
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Aluno não encontrado' });
-    }
-
-    const participant = result.rows[0];
-    participant.photo = participant.photo || null;
-
-    res.json({
-      success: true,
-      participant
-    });
-  } catch (err) {
-    console.error('Erro ao buscar participante (público):', err);
-    res.status(500).json({ error: 'Erro ao buscar aluno' });
-  }
-});
 
 
 // POST - Cadastra novo aluno

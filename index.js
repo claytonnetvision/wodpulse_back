@@ -78,28 +78,26 @@ app.get('/', (req, res) => {
 });
 
 
-// --- BLOCO DE REGISTRO DE ROTAS (VERSÃO FINAL CORRETA) ---
-
-const participantsRouter = require('./routes/participants');
-const sessionsRouter = express.Router();
+// --- BLOCO DE REGISTRO DE ROTAS (VERSÃO FINAL COM SEPARAÇÃO EXPLÍCITA) ---
 
 // 1. Rota de login do instrutor (pública)
 app.use('/api/auth', require('./routes/auth'));
 
-// 2. Rota PÚBLICA para buscar detalhes de um participante (para o link do e-mail)
-// Esta é a exceção e deve vir antes da regra geral protegida.
-app.get('/api/participants/:id', participantsRouter);
+// 2. Rota PÚBLICA para o link do e-mail
+// Usa o arquivo public-participants.js, SEM middleware.
+// O endereço é exclusivo para evitar conflitos.
+app.use('/api/public/participants', require('./routes/public-participants'));
 
 // 3. Rotas de Super Admin (protegidas)
 app.use('/api/superadmin', authenticateSuperAdmin, require('./routes/superadmin'));
 
 // 4. Rotas de Instrutor (protegidas)
-// A linha abaixo protege TODAS as outras rotas do participantsRouter (GET /, POST /, etc.)
-app.use('/api/participants', authenticateMiddleware, participantsRouter);
+// Usa o arquivo principal participants.js (que não tem mais a rota GET /:id), COM middleware.
+app.use('/api/participants', authenticateMiddleware, require('./routes/participants'));
 app.use('/api/body-progress', authenticateMiddleware, require('./routes/body-progress'));
 
 // 5. Rotas de Sessões (protegidas)
-// A linha abaixo protege TODAS as rotas que serão definidas no sessionsRouter
+const sessionsRouter = express.Router();
 app.use('/api/sessions', authenticateMiddleware, sessionsRouter);
 
 // 6. Rotas de Social e Challenges (lógica própria, sem nosso middleware)
