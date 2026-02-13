@@ -1,4 +1,4 @@
-// Arquivo: backend/routes/superadmin.js
+// Arquivo: backend/routes/superadmin.js (VERSÃO CORRIGIDA E COMPLETA)
 
 const express = require('express');
 const router = express.Router();
@@ -9,6 +9,8 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
+// --- ROTAS DE GERENCIAMENTO (Seu código original, mantido 100%) ---
 
 // ROTA PARA CRIAR UM NOVO BOX
 router.post('/create-box', async (req, res) => {
@@ -101,6 +103,113 @@ router.get('/all-users', async (req, res) => {
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: 'Erro ao buscar usuários.' });
+    }
+});
+
+// --- ROTAS DE VISUALIZAÇÃO E DELEÇÃO (NOVAS) ---
+
+// ROTA PARA LISTAR TODOS os participantes de TODOS os boxes
+router.get('/all-participants', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT id, box_id, name, email, device_name, device_id 
+            FROM participants 
+            ORDER BY box_id, name ASC
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Erro ao buscar todos os participantes:', err);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// ROTA PARA LISTAR TODAS as sessões de TODOS os boxes
+router.get('/all-sessions', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT s.id, s.box_id, s.class_name, s.date_start, s.duration_minutes, COUNT(sp.participant_id) AS participant_count
+            FROM sessions s
+            LEFT JOIN session_participants sp ON s.id = sp.session_id
+            GROUP BY s.id
+            ORDER BY s.date_start DESC
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Erro ao buscar todas as sessões:', err);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// ROTA PARA VER DETALHES de UMA sessão (sem filtro de box)
+router.get('/session-details/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const sessionRes = await pool.query(`SELECT * FROM sessions WHERE id = $1`, [id]);
+        if (sessionRes.rowCount === 0) return res.status(404).json({ error: 'Sessão não encontrada' });
+
+        const participantsRes = await pool.query(`
+            SELECT p.name, sp.calories_total, sp.queima_points, sp.trimp_total
+            FROM session_participants sp
+            JOIN participants p ON p.id = sp.participant_id
+            WHERE sp.session_id = $1
+        `, [id]);
+
+        res.json({ session: sessionRes.rows[0], participants: participantsRes.rows });
+    } catch (err) {
+        console.error('Erro ao buscar detalhes da sessão (superadmin):', err);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// ROTA PARA DELETAR UM BOX (e tudo associado a ele em cascata)
+router.delete('/delete-box/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM boxes WHERE id = $1 RETURNING name', [id]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Box não encontrado.' });
+        }
+        res.json({ success: true, message: `Box "${result.rows[0].name}" e todos os seus dados foram excluídos.` });
+    } catch (err) {
+        console.error('Erro ao deletar box:', err);
+        res.status(500).json({ error: 'Erro interno ao deletar o box.' });
+    }
+});
+
+// ROTA PARA DELETAR UM USUÁRIO ADMIN
+router.delete('/delete-user/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING username', [id]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+        res.json({ success: true, message: `Usuário "${result.rows[0].username}" foi excluído.` });
+    } catch (err) {
+        console.error('Erro ao deletar usuário:', err);
+        res.status(500).json({ error: 'Erro interno ao deletar usuário.' });
+    }
+});
+
+// ROTA PARA DELETAR UM PARTICIPANTE (aluno)
+router.delete('/delete-participant/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('DELETE FROM participants WHERE id = $1', [id]);
+        res.json({ success: true, message: 'Aluno excluído com sucesso.' });
+    } catch (err) {
+        res.status(500).json({ error: 'Erro ao excluir aluno.' });
+    }
+});
+
+// ROTA PARA DELETAR UMA SESSÃO (aula)
+router.delete('/delete-session/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('DELETE FROM sessions WHERE id = $1', [id]);
+        res.json({ success: true, message: 'Aula excluída com sucesso.' });
+    } catch (err) {
+        res.status(500).json({ error: 'Erro ao excluir aula.' });
     }
 });
 
