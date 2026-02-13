@@ -42,23 +42,22 @@ router.get('/', async (req, res) => {
 });
 
 // GET individual
+// GET individual
 router.get('/:id', async (req, res) => {
   const { id } = req.params;
-  // ALTERAÇÃO: Pegamos o boxId que o middleware injetou na requisição.
-  const boxId = req.boxId;
+  // NÃO precisamos do boxId aqui, pois esta rota será pública.
 
   try {
-    // ALTERAÇÃO: Adicionamos "AND box_id = $2" para garantir que o usuário só possa ver alunos do seu próprio box.
+    // A query volta a ser como era originalmente, buscando apenas pelo ID do aluno.
     const result = await pool.query(
       `SELECT id, name, name_lower, age, weight, height_cm, gender, resting_hr, email,
               use_tanaka, max_hr, historical_max_hr, device_id, device_name, photo, preferred_layout,
               created_at, updated_at
-       FROM participants WHERE id = $1 AND box_id = $2`,
-      [id, boxId] // ALTERAÇÃO: Passamos o id do aluno e o id do box.
+       FROM participants WHERE id = $1`,
+      [id] // Passamos apenas o ID do aluno.
     );
 
     if (result.rowCount === 0) {
-      // A mensagem de erro é genérica por segurança.
       return res.status(404).json({ error: 'Aluno não encontrado' });
     }
 
@@ -70,10 +69,11 @@ router.get('/:id', async (req, res) => {
       participant
     });
   } catch (err) {
-    console.error('Erro ao buscar participante:', err);
+    console.error('Erro ao buscar participante (público):', err);
     res.status(500).json({ error: 'Erro ao buscar aluno' });
   }
 });
+
 
 // POST - Cadastra novo aluno
 router.post('/', async (req, res) => {
