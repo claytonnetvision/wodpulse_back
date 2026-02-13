@@ -904,6 +904,36 @@ router.post('/profile/update', validateDBSession, async (req, res) => {
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+// ... (todo o seu código existente do social.js) ...
+
+// ROTA NOVA: Rota segura para o histórico de treinos do aluno
+// Usa o middleware `validateDBSession` que já existe neste arquivo.
+router.get('/my-sessions-history', validateDBSession, async (req, res) => {
+  // req.user.participant_id vem do token do aluno, garantindo que ele só veja os seus próprios dados.
+  const alunoId = req.user.participant_id;
+
+  try {
+    const historicoRes = await pool.query(
+      `SELECT s.id AS id_sessao, s.class_name, s.date_start, s.duration_minutes,
+              sp.calories_total, sp.avg_hr, sp.max_hr_reached, sp.min_red, sp.queima_points,
+              sp.trimp_total, sp.epoc_estimated, sp.real_resting_hr, sp.min_zone2,
+              sp.min_zone3, sp.min_zone4, sp.min_zone5, sp.ia_comment
+       FROM sessions s
+       JOIN session_participants sp ON sp.session_id = s.id
+       WHERE sp.participant_id = $1
+       ORDER BY s.date_start DESC`,
+      [alunoId]
+    );
+
+    res.json(historicoRes.rows);
+
+  } catch (err) {
+    console.error('Erro ao carregar histórico de sessões do aluno:', err);
+    res.status(500).json({ error: 'Erro interno ao buscar histórico de sessões.' });
+  }
+});
+
+module.exports = router;
 
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
