@@ -78,10 +78,10 @@ app.get('/', (req, res) => {
 });
 
 
-// --- BLOCO DE REGISTRO DE ROTAS (VERSÃO FINAL CORRIGIDA) ---
+// --- BLOCO DE REGISTRO DE ROTAS (VERSÃO FINAL CORRETA) ---
 
 const participantsRouter = require('./routes/participants');
-const sessionsRouter = express.Router(); // Definimos o sessionsRouter aqui
+const sessionsRouter = express.Router();
 
 // 1. Rota de login do instrutor (pública)
 app.use('/api/auth', require('./routes/auth'));
@@ -107,7 +107,6 @@ app.use('/api/social', socialRouter);
 app.use('/api/challenges', challengeRoutes);
 
 // --- FIM DO BLOCO DE REGISTRO ---
-
 
 
 // --- FIM DO AJUSTE ---
