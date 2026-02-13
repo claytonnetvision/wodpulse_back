@@ -71,6 +71,13 @@ setInterval(async () => {
   }
 }, 4 * 60 * 1000);
 
+// (Seu código original desde o início até a declaração das rotas)
+// ...
+
+// ALTERAÇÃO: Importando nosso middleware de autenticação do instrutor.
+const authenticateMiddleware = require('./routes/middleware/auth');
+
+// ...
 app.get('/', (req, res) => {
   res.json({ 
     status: 'WODPulse Backend online', 
@@ -78,11 +85,28 @@ app.get('/', (req, res) => {
   });
 });
 
+// --- REGISTRO DAS ROTAS ---
+
+// Rota de login do instrutor (pública, sem middleware)
 app.use('/api/auth', require('./routes/auth'));
+
+// ALTERAÇÃO: Aplicando o middleware de autenticação nas rotas que precisam de proteção.
+// Qualquer rota registrada abaixo desta linha exigirá um token de instrutor válido.
+app.use('/api/participants', authenticateMiddleware);
+app.use('/api/body-progress', authenticateMiddleware);
+app.use('/api/sessions', authenticateMiddleware);
+app.use('/api/ai-analyze-body-progress', authenticateMiddleware);
+app.delete('/api/sessions/:id', authenticateMiddleware);
+app.get('/api/participants/ranking-acumulado', authenticateMiddleware);
+app.get('/api/sessions/historico', authenticateMiddleware);
+
+// Rotas que agora estão protegidas
 app.use('/api/participants', require('./routes/participants'));
 app.use('/api/body-progress', require('./routes/body-progress'));
 
 const sessionsRouter = express.Router();
+// ...
+
 // Novo endpoint para análise de progresso corporal
 app.post('/api/ai-analyze-body-progress', async (req, res) => {
   try {
@@ -139,9 +163,12 @@ Use Markdown leve (**negrito**, listas). Máximo 600 palavras.`;
   }
 });
 sessionsRouter.post('/', async (req, res) => {
-  const { class_name, date_start, date_end, duration_minutes, box_id, participantsData } = req.body;
+  // ALTERAÇÃO: O `box_id` que vem do corpo da requisição é ignorado.
+  const { class_name, date_start, date_end, duration_minutes, participantsData } = req.body;
+  // ALTERAÇÃO: Usamos o boxId seguro que veio do token verificado pelo middleware.
+  const boxId = req.boxId;
 
-  console.log('[SESSION] Dados recebidos do frontend:', JSON.stringify(req.body, null, 2));
+  console.log(`[SESSION] Dados recebidos para o Box ID: ${boxId}`, JSON.stringify(req.body, null, 2));
 
   if (!class_name || !date_start || !date_end) {
     console.log('[SESSION] Campos obrigatórios faltando');
@@ -204,7 +231,7 @@ sessionsRouter.post('/', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING id`,
       [
-        box_id || 1,
+        boxId, // ALTERAÇÃO: Usando o boxId do token, em vez de `box_id || 1`.
         class_name,
         date_start,
         date_end,
@@ -269,8 +296,11 @@ sessionsRouter.post('/', async (req, res) => {
   }
 });
 
+
 sessionsRouter.get('/', async (req, res) => {
   const { start_date, end_date, participant_id, limit = 50 } = req.query;
+  // ALTERAÇÃO: Pegando o boxId do token.
+  const boxId = req.boxId;
 
   let queryText = `
     SELECT 
@@ -282,10 +312,12 @@ sessionsRouter.get('/', async (req, res) => {
       COUNT(sp.participant_id) AS participant_count
     FROM sessions s
     LEFT JOIN session_participants sp ON s.id = sp.session_id
-    WHERE 1=1
+    WHERE s.box_id = $1
   `;
-  const params = [];
-  let paramIndex = 1;
+  // ALTERAÇÃO: O primeiro parâmetro da query agora é sempre o boxId.
+  const params = [boxId];
+  // ALTERAÇÃO: O próximo parâmetro a ser adicionado será o $2.
+  let paramIndex = 2;
 
   if (start_date) {
     queryText += ` AND s.date_start >= $${paramIndex}`;
@@ -322,16 +354,20 @@ sessionsRouter.get('/', async (req, res) => {
   }
 });
 
+
 sessionsRouter.get('/:id', async (req, res) => {
   const sessionId = req.params.id;
+  // ALTERAÇÃO: Pegando o boxId do token.
+  const boxId = req.boxId;
 
   try {
+    // ALTERAÇÃO: Adicionando "AND box_id = $2" para garantir que um box só veja detalhes de suas próprias aulas.
     const sessionRes = await pool.query(`
       SELECT 
         id, class_name, date_start, date_end, duration_minutes
       FROM sessions 
-      WHERE id = $1
-    `, [sessionId]);
+      WHERE id = $1 AND box_id = $2
+    `, [sessionId, boxId]);
 
     if (sessionRes.rowCount === 0) {
       return res.status(404).json({ error: 'Sessão não encontrada' });
@@ -364,16 +400,23 @@ sessionsRouter.get('/:id', async (req, res) => {
   }
 });
 
+
 sessionsRouter.get('/ranking-semanal', async (req, res) => {
   const { gender, metric = 'queima_points', limit = 10 } = req.query;
+  // ALTERAÇÃO: Pegando o boxId do token para filtrar o ranking.
+  const boxId = req.boxId;
 
   const today = new Date();
-  const monday = new Date(today.setDate(today.getDate() - today.getDay() + 1));
+  const dayOfWeek = today.getDay();
+  const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Ajuste para semana começar na segunda
+  const monday = new Date(today.setDate(diff));
   monday.setHours(0, 0, 0, 0);
+  
   const nextMonday = new Date(monday);
   nextMonday.setDate(nextMonday.getDate() + 7);
-  const nextMondayStr = nextMonday.toISOString().split('T')[0];
+  
   const mondayStr = monday.toISOString().split('T')[0];
+  const nextMondayStr = nextMonday.toISOString().split('T')[0];
 
   let queryText = `
     SELECT 
@@ -388,8 +431,9 @@ sessionsRouter.get('/ranking-semanal', async (req, res) => {
     JOIN participants p ON sp.participant_id = p.id
     WHERE s.date_start >= $1 
       AND s.date_start < $2
+      AND s.box_id = $3 -- ALTERAÇÃO: Filtro para o ranking ser apenas do box logado.
   `;
-  const params = [mondayStr, nextMondayStr];
+  const params = [mondayStr, nextMondayStr, boxId]; // ALTERAÇÃO: Adicionado boxId aos parâmetros.
 
   if (gender) {
     queryText += ` AND p.gender = $${params.length + 1}`;
@@ -429,12 +473,24 @@ sessionsRouter.get('/ranking-semanal', async (req, res) => {
   }
 });
 
+
 app.delete('/api/sessions/:id', async (req, res) => {
   const { id } = req.params;
+  // ALTERAÇÃO: Pegando o boxId do token.
+  const boxId = req.boxId;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // ALTERAÇÃO: Antes de deletar, verificamos se a sessão pertence ao box que está fazendo a requisição.
+    const sessionCheck = await client.query('SELECT id FROM sessions WHERE id = $1 AND box_id = $2', [id, boxId]);
+    if (sessionCheck.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Sessão não encontrada ou não pertence a este box' });
+    }
+
     await client.query('DELETE FROM session_participants WHERE session_id = $1', [id]);
+    // A deleção da sessão em si já é segura pela verificação feita acima.
     await client.query('DELETE FROM sessions WHERE id = $1', [id]);
     await client.query('COMMIT');
     res.json({ success: true });
@@ -446,8 +502,11 @@ app.delete('/api/sessions/:id', async (req, res) => {
   }
 });
 
+
 app.get('/api/participants/ranking-acumulado', async (req, res) => {
   const { alunoId, inicio, fim } = req.query;
+  // ALTERAÇÃO: Pegando o boxId do token.
+  const boxId = req.boxId;
 
   let query = `
     SELECT 
@@ -468,10 +527,10 @@ app.get('/api/participants/ranking-acumulado', async (req, res) => {
     FROM participants p
     LEFT JOIN session_participants sp ON sp.participant_id = p.id
     LEFT JOIN sessions s ON s.id = sp.session_id
-    WHERE 1=1
+    WHERE p.box_id = $1 -- ALTERAÇÃO: Filtro principal para garantir que só dados do box sejam considerados.
   `;
-  const params = [];
-  let paramIndex = 1;
+  const params = [boxId]; // ALTERAÇÃO: Primeiro parâmetro é o boxId.
+  let paramIndex = 2; // ALTERAÇÃO: Próximo parâmetro é o $2.
 
   if (alunoId) {
     query += ` AND p.id = $${paramIndex}`;
@@ -500,8 +559,11 @@ app.get('/api/participants/ranking-acumulado', async (req, res) => {
   }
 });
 
+
 app.get('/api/sessions/historico', async (req, res) => {
   const { alunoId, inicio, fim } = req.query;
+  // ALTERAÇÃO: Pegando o boxId do token.
+  const boxId = req.boxId;
 
   let query = `
     SELECT 
@@ -528,10 +590,10 @@ app.get('/api/sessions/historico', async (req, res) => {
     FROM sessions s
     JOIN session_participants sp ON sp.session_id = s.id
     JOIN participants p ON p.id = sp.participant_id
-    WHERE 1=1
+    WHERE s.box_id = $1 -- ALTERAÇÃO: Filtro principal para garantir que só dados do box sejam retornados.
   `;
-  const params = [];
-  let paramIndex = 1;
+  const params = [boxId]; // ALTERAÇÃO: Primeiro parâmetro é o boxId.
+  let paramIndex = 2; // ALTERAÇÃO: Próximo parâmetro é o $2.
 
   if (alunoId) {
     query += ` AND p.id = $${paramIndex}`;
@@ -559,6 +621,7 @@ app.get('/api/sessions/historico', async (req, res) => {
     res.status(500).json({ error: 'Erro ao buscar histórico' });
   }
 });
+
 
 app.get('/api/sessions', async (req, res) => {
   try {

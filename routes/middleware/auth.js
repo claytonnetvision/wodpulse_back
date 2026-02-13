@@ -1,4 +1,10 @@
+// Arquivo: middleware.js (o seu arquivo, com o nome que ele já tem)
+// CONTEÚDO ATUALIZADO
+
 const jwt = require('jsonwebtoken');
+
+// A mesma chave secreta que você usa no auth.js para criar o token
+const SECRET_KEY = 'CHAVE-FIXA-ROBSON-2026-TESTE-ABC123XYZ789';
 
 module.exports = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -17,20 +23,31 @@ module.exports = (req, res, next) => {
 
   const token = parts[1];
 
-  // CHAVE FIXA PARA TESTE - deve ser EXATAMENTE a mesma do login
-  const SECRET_KEY = 'CHAVE-FIXA-ROBSON-2026-TESTE-ABC123XYZ789';
-
   try {
-    const decoded = jwt.verify(token, SECRET_KEY);
+    // 1. Verificamos e decodificamos o token
+    const payload = jwt.verify(token, SECRET_KEY);
 
-    console.log('[AUTH MIDDLEWARE] Token válido! Payload decodificado:', decoded);
-    console.log('[AUTH MIDDLEWARE] Token recebido (início):', token.substring(0, 50) + '...');
+    console.log('[AUTH MIDDLEWARE] Token válido! Payload decodificado:', payload);
 
-    req.user = decoded;
+    // 2. Verificamos se a informação ESSENCIAL (boxId) está no token
+    if (!payload.boxId) {
+        console.error('[AUTH MIDDLEWARE] Token válido, mas sem boxId no payload.');
+        return res.status(403).json({ error: 'Token incompleto, boxId ausente.' });
+    }
+
+    // 3. Anexamos as informações diretamente na requisição (req)
+    //    Isso deixa o uso nas rotas mais claro (req.boxId em vez de req.user.boxId)
+    req.boxId = payload.boxId;
+    req.userId = payload.userId;
+    req.userRole = payload.role; // Opcional, mas útil para o futuro
+
+    console.log(`[AUTH MIDDLEWARE] Acesso liberado para Box ID: ${req.boxId}, Usuário ID: ${req.userId}`);
+    
+    // 4. Tudo certo, pode prosseguir para a rota final!
     next();
+
   } catch (err) {
     console.error('[AUTH MIDDLEWARE] Erro ao validar token:', err.message);
-    console.error('[AUTH MIDDLEWARE] Token recebido (início):', token.substring(0, 50) + '...');
     return res.status(401).json({ error: 'Token inválido ou expirado' });
   }
 };
