@@ -967,6 +967,58 @@ router.get('/user-history', validateDBSession, async (req, res) => {
         res.status(500).json({ error: 'Erro interno ao buscar histórico de sessões.' });
     }
 });
+// Adicione estas rotas ao seu arquivo `routes/social.js`
+
+// ROTA 1: Buscar o histórico de mensagens com um amigo específico
+router.get('/messages/:friendId', validateDBSession, async (req, res) => {
+  const selfId = req.user.participant_id;
+  const friendId = parseInt(req.params.friendId);
+
+  try {
+    const result = await pool.query(
+      `SELECT id, sender_id, receiver_id, content, created_at
+       FROM social_messages
+       WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)
+       ORDER BY created_at ASC`,
+      [selfId, friendId]
+    );
+
+    // Opcional: Marcar mensagens como lidas
+    await pool.query(
+      `UPDATE social_messages SET is_read = TRUE WHERE sender_id = $1 AND receiver_id = $2`,
+      [friendId, selfId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Erro ao buscar mensagens:', err);
+    res.status(500).json({ error: 'Erro ao buscar mensagens.' });
+  }
+});
+
+// ROTA 2: Enviar uma nova mensagem
+router.post('/messages/send', validateDBSession, async (req, res) => {
+  const selfId = req.user.participant_id;
+  const { receiverId, content } = req.body;
+
+  if (!receiverId || !content || content.trim() === '') {
+    return res.status(400).json({ error: 'Destinatário e conteúdo são obrigatórios.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO social_messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *',
+      [selfId, parseInt(receiverId), content]
+    );
+
+    // Aqui você poderia adicionar lógica para enviar uma notificação push no futuro
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Erro ao enviar mensagem:', err);
+    res.status(500).json({ error: 'Erro ao enviar mensagem.' });
+  }
+});
 
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
