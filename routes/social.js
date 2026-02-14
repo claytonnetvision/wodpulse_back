@@ -933,7 +933,40 @@ router.get('/my-sessions-history', validateDBSession, async (req, res) => {
   }
 });
 
-module.exports = router;
+// Em backend/routes/social.js
+
+// ... (todo o seu código existente do social.js) ...
+
+// --- ROTA NOVA PARA HISTÓRICO PÚBLICO/DE AMIGOS ---
+// Esta rota é segura e usa o mesmo "porteiro" dos alunos (validateDBSession)
+router.get('/user-history', validateDBSession, async (req, res) => {
+    // 1. Verifica se um 'alunoId' foi passado na URL (ex: ?alunoId=83)
+    const targetId = req.query.alunoId;
+    
+    // 2. Decide qual ID usar: o da URL (se existir) ou o do próprio usuário logado.
+    const userIdToFetch = targetId || req.user.participant_id;
+
+    console.log(`[USER HISTORY] Buscando histórico para o ID: ${userIdToFetch}`);
+
+    try {
+        // 3. A query busca o histórico para o ID correto
+        const historicoRes = await pool.query(
+            `SELECT s.id AS id_sessao, s.class_name, s.date_start, p.name as aluno, sp.*
+             FROM sessions s
+             JOIN session_participants sp ON sp.session_id = s.id
+             JOIN participants p ON p.id = sp.participant_id
+             WHERE sp.participant_id = $1
+             ORDER BY s.date_start DESC`,
+            [userIdToFetch]
+        );
+
+        res.json(historicoRes.rows);
+
+    } catch (err) {
+        console.error('Erro ao carregar histórico de sessões do usuário:', err);
+        res.status(500).json({ error: 'Erro interno ao buscar histórico de sessões.' });
+    }
+});
 
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
