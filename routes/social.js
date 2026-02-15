@@ -1231,8 +1231,11 @@ router.post('/messages/mark-as-read', validateDBSession, async (req, res) => {
     }
 });
 // ADICIONE ESTA NOVA ROTA AO SEU social.js
+// NO ARQUIVO: backend/routes/social.js
+
+// SUBSTITUA A ROTA DE ATUALIZAR FOTO PELA VERSÃO ABAIXO
 router.put('/profile/photo', validateDBSession, async (req, res) => {
-    const { photo } = req.body; // Espera a foto em base64
+    let { photo } = req.body; // Usamos 'let' para poder modificar a variável
     const userId = req.user.participant_id;
 
     if (!photo) {
@@ -1240,17 +1243,27 @@ router.put('/profile/photo', validateDBSession, async (req, res) => {
     }
 
     try {
+        // ==================================================
+        // LÓGICA CORRIGIDA E SEGURA:
+        // Remove o prefixo 'data:image/...' APENAS SE ele existir.
+        // Isso garante que o banco de dados sempre armazene o base64 puro.
+        // ==================================================
+        if (photo.startsWith('data:image')) {
+            photo = photo.split(',')[1];
+        }
+
         await pool.query(
             'UPDATE participants SET photo = $1 WHERE id = $2',
             [photo, userId]
         );
-        console.log(`[API SOCIAL] Foto de perfil do usuário ${userId} atualizada com sucesso.`);
+        console.log(`[API SOCIAL] Foto de perfil do usuário ${userId} atualizada com sucesso (sem prefixo).`);
         res.status(200).json({ success: true, message: 'Foto de perfil atualizada.' });
     } catch (err) {
         console.error('[API SOCIAL] Erro ao atualizar foto de perfil:', err);
         res.status(500).json({ error: 'Erro interno ao atualizar a foto.' });
     }
 });
+
 
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
