@@ -976,33 +976,30 @@ router.get('/user-history', validateDBSession, async (req, res) => {
 // SUBSTITUA AS DUAS ROTAS DE CHAT PELAS VERSÕES FINAIS E CORRIGIDAS
 
 
+// ROTA PARA NOTIFICAÇÕES DE MENSAGENS (VERSÃO FINAL CORRIGIDA)
 router.get('/messages/notifications', validateDBSession, async (req, res) => {
     const selfId = req.user.participant_id;
-
     try {
-        // Esta query busca a última mensagem não lida de cada conversa
-        // e agrupa pelo remetente, contando quantas mensagens não lidas cada um enviou.
         const result = await pool.query(`
             SELECT 
                 sender_id,
                 p.name as sender_name,
                 p.photo as sender_photo,
                 COUNT(*) as unread_count,
-                MAX(created_at) as last_message_time
+                MAX(sm.created_at) as last_message_time -- <<<<<<< AQUI ESTÁ A CORREÇÃO
             FROM social_messages sm
             JOIN participants p ON sm.sender_id = p.id
             WHERE sm.receiver_id = $1 AND sm.is_read = FALSE
             GROUP BY sender_id, p.name, p.photo
             ORDER BY last_message_time DESC
         `, [selfId]);
-
         res.json(result.rows);
-
     } catch (err) {
-        console.error('[API NOTIFICATIONS] Erro ao buscar notificações de mensagens:', err);
+        console.error('[API NOTIFICATIONS] Erro ao buscar notificações:', err);
         res.status(500).json({ error: 'Erro interno ao buscar notificações.' });
     }
 });
+
 // ROTA PARA BUSCAR MENSAGENS DE UMA CONVERSA (USA "message")
 
 router.get('/messages/:friendId', validateDBSession, async (req, res) => {
