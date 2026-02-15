@@ -970,55 +970,60 @@ router.get('/user-history', validateDBSession, async (req, res) => {
 // Adicione estas rotas ao seu arquivo `routes/social.js`
 
 // ROTA 1: Buscar o histórico de mensagens com um amigo específico
+// SUBSTITUA AS DUAS ROTAS DE CHAT ANTIGAS POR ESTAS VERSÕES CORRIGIDAS
+
+// ROTA PARA BUSCAR MENSAGENS DE UMA CONVERSA (CORRIGIDA)
 router.get('/messages/:friendId', validateDBSession, async (req, res) => {
-  const selfId = req.user.participant_id;
-  const friendId = parseInt(req.params.friendId);
+    const { friendId } = req.params;
+    const selfId = req.user.participant_id;
 
-  try {
-    const result = await pool.query(
-      `SELECT id, sender_id, receiver_id, content, created_at
-       FROM social_messages
-       WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)
-       ORDER BY created_at ASC`,
-      [selfId, friendId]
-    );
+    console.log(`[CHAT API] Buscando mensagens entre ${selfId} e ${friendId}`);
 
-    // Opcional: Marcar mensagens como lidas
-    await pool.query(
-      `UPDATE social_messages SET is_read = TRUE WHERE sender_id = $1 AND receiver_id = $2`,
-      [friendId, selfId]
-    );
+    try {
+        // CORREÇÃO: Selecionando todas as colunas explicitamente para evitar erros.
+        const result = await pool.query(`
+            SELECT id, sender_id, receiver_id, content, is_read, created_at 
+            FROM social_messages
+            WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)
+            ORDER BY created_at ASC
+        `, [selfId, friendId]);
+        
+        console.log(`[CHAT API] Encontradas ${result.rows.length} mensagens.`);
+        res.json(result.rows);
 
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Erro ao buscar mensagens:', err);
-    res.status(500).json({ error: 'Erro ao buscar mensagens.' });
-  }
+    } catch (err) {
+        console.error('[CHAT API] Erro ao buscar mensagens:', err);
+        res.status(500).json({ error: 'Erro interno ao buscar mensagens.', details: err.message });
+    }
 });
 
-// ROTA 2: Enviar uma nova mensagem
+// ROTA PARA ENVIAR UMA MENSAGEM (CORRIGIDA)
 router.post('/messages/send', validateDBSession, async (req, res) => {
-  const selfId = req.user.participant_id;
-  const { receiverId, content } = req.body;
+    const { receiverId, content } = req.body;
+    const senderId = req.user.participant_id;
 
-  if (!receiverId || !content || content.trim() === '') {
-    return res.status(400).json({ error: 'Destinatário e conteúdo são obrigatórios.' });
-  }
+    console.log(`[CHAT API] Recebida mensagem de ${senderId} para ${receiverId}: "${content}"`);
 
-  try {
-    const result = await pool.query(
-      'INSERT INTO social_messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *',
-      [selfId, parseInt(receiverId), content]
-    );
+    if (!receiverId || !content) {
+        console.log('[CHAT API] Erro: Dados incompletos.');
+        return res.status(400).json({ error: 'receiverId e content são obrigatórios.' });
+    }
 
-    // Aqui você poderia adicionar lógica para enviar uma notificação push no futuro
+    try {
+        const result = await pool.query(
+            'INSERT INTO social_messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *',
+            [senderId, receiverId, content]
+        );
+        
+        console.log('[CHAT API] Mensagem inserida no banco com sucesso. ID:', result.rows[0].id);
+        res.status(201).json(result.rows[0]);
 
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error('Erro ao enviar mensagem:', err);
-    res.status(500).json({ error: 'Erro ao enviar mensagem.' });
-  }
+    } catch (err) {
+        console.error('[CHAT API] Erro ao enviar mensagem:', err);
+        res.status(500).json({ error: 'Erro interno ao enviar mensagem.', details: err.message });
+    }
 });
+
 // ROTA PARA BUSCAR COMENTÁRIOS DE UMA FOTO
 router.get('/photos/:photoId/comments', validateDBSession, async (req, res) => {
     const { photoId } = req.params;
