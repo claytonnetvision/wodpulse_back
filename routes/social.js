@@ -595,6 +595,19 @@ router.get('/candidates', validateDBSession, async (req, res) => {
   }
 });
 
+// ROTA PARA BUSCAR TODOS OS USUÁRIOS PARA DESAFIOS/BUSCA
+router.get('/all-users', validateDBSession, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT id, name, photo FROM participants WHERE id != $1 ORDER BY name ASC',
+            [req.user.participant_id] // Exclui o próprio usuário da lista
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Erro ao buscar todos os usuários:', err);
+        res.status(500).json({ error: 'Erro interno ao buscar usuários.' });
+    }
+});
 
 router.post('/match', validateDBSession, async (req, res) => {
   const { targetId, action } = req.body;
