@@ -7,7 +7,8 @@ const app = express();
 const port = process.env.PORT || 3001;
 const { gerarAnaliseGemini } = require('./utils/gemini');
 const socialRouter = require('./routes/social');
-const challengeRoutes = require('./routes/challenges');
+const challengeRoutes = require('./routes/challenges')(pool);
+
 
 // --- Importando os middlewares no topo ---
 const authenticateMiddleware = require('./routes/middleware/auth');
