@@ -1019,6 +1019,83 @@ router.post('/messages/send', validateDBSession, async (req, res) => {
     res.status(500).json({ error: 'Erro ao enviar mensagem.' });
   }
 });
+// ROTA PARA BUSCAR COMENTÁRIOS DE UMA FOTO
+router.get('/photos/:photoId/comments', validateDBSession, async (req, res) => {
+    const { photoId } = req.params;
+    try {
+        const result = await pool.query(`
+            SELECT c.*, p.name as user_name, p.photo as user_photo
+            FROM social_photo_comments c
+            JOIN participants p ON c.user_id = p.id
+            WHERE c.photo_id = $1
+            ORDER BY c.created_at ASC
+        `, [photoId]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Erro ao buscar comentários da foto:', err);
+        res.status(500).json({ error: 'Erro interno ao buscar comentários.' });
+    }
+});
+
+// ROTA PARA POSTAR UM NOVO COMENTÁRIO
+router.post('/photos/:photoId/comments', validateDBSession, async (req, res) => {
+    const { photoId } = req.params;
+    const { content } = req.body;
+    const userId = req.user.participant_id;
+
+    if (!content) {
+        return res.status(400).json({ error: 'O conteúdo do comentário não pode ser vazio.' });
+    }
+
+    try {
+        const result = await pool.query(
+            'INSERT INTO social_photo_comments (photo_id, user_id, content) VALUES ($1, $2, $3) RETURNING *',
+            [photoId, userId, content]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('Erro ao postar comentário:', err);
+        res.status(500).json({ error: 'Erro interno ao postar comentário.' });
+    }
+});
+// ROTA PARA BUSCAR MENSAGENS DE UMA CONVERSA
+router.get('/messages/:friendId', validateDBSession, async (req, res) => {
+    const { friendId } = req.params;
+    const selfId = req.user.participant_id;
+
+    try {
+        const result = await pool.query(`
+            SELECT * FROM social_messages
+            WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)
+            ORDER BY created_at ASC
+        `, [selfId, friendId]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Erro ao buscar mensagens:', err);
+        res.status(500).json({ error: 'Erro interno ao buscar mensagens.' });
+    }
+});
+
+// ROTA PARA ENVIAR UMA MENSAGEM
+router.post('/messages/send', validateDBSession, async (req, res) => {
+    const { receiverId, content } = req.body;
+    const senderId = req.user.participant_id;
+
+    if (!receiverId || !content) {
+        return res.status(400).json({ error: 'receiverId e content são obrigatórios.' });
+    }
+
+    try {
+        const result = await pool.query(
+            'INSERT INTO social_messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *',
+            [senderId, receiverId, content]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('Erro ao enviar mensagem:', err);
+        res.status(500).json({ error: 'Erro interno ao enviar mensagem.' });
+    }
+});
 
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
