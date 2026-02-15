@@ -3,19 +3,26 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 
-const app = express();
-const port = process.env.PORT || 3001;
-const { gerarAnaliseGemini } = require('./utils/gemini');
-const socialRouter = require('./routes/social');
-const challengeRoutes = require('./routes/challenges')(pool);
+// ==================================================
+// CORREÇÃO PRINCIPAL: A CRIAÇÃO DO 'pool' VEM PRIMEIRO
+// ==================================================
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
+// AGORA PODEMOS INICIALIZAR O EXPRESS E AS ROTAS
+const app = express();
+const port = process.env.PORT || 3001;
+const { gerarAnaliseGemini } = require('./utils/gemini');
+const socialRouter = require('./routes/social');
+// Esta linha agora funciona, pois a variável 'pool' já existe.
+const challengeRoutes = require('./routes/challenges')(pool); 
+
 // --- Importando os middlewares no topo ---
 const authenticateMiddleware = require('./routes/middleware/auth');
 const { authenticateSuperAdmin } = require('./routes/middleware/superAdminAuth');
+
 
 // Middleware CORS manual (mais robusto no Render)
 app.use((req, res, next) => {
@@ -49,8 +56,6 @@ app.options('*', cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-
-
 pool.connect()
   .then(() => console.log('→ Conectado ao PostgreSQL (Neon)'))
   .catch(err => console.error('Erro ao conectar no banco:', err.stack));
@@ -61,6 +66,8 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// --- O RESTO DO SEU ARQUIVO CONTINUA DAQUI ---
 
 setInterval(async () => {
   try {
