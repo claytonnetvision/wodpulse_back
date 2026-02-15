@@ -194,22 +194,27 @@ router.delete('/delete-user/:id', async (req, res) => {
 // ROTA PARA DELETAR UM PARTICIPANTE (aluno)
 // SUBSTITUA A ROTA ANTIGA POR ESTA VERSÃO COMPLETA E SEGURA
 
+// SUBSTITUA A ROTA DE DELEÇÃO PELA VERSÃO CORRIGIDA E FINAL
+
 router.delete('/delete-participant/:id', async (req, res) => {
     const { id } = req.params;
-    const client = await pool.connect(); // Usa uma transação para garantir que tudo seja executado ou nada seja.
+    const client = await pool.connect();
 
     console.log(`[SUPER ADMIN] Recebida requisição para deletar participante ID: ${id}`);
 
     try {
-        await client.query('BEGIN'); // Inicia a transação
+        await client.query('BEGIN');
 
-        // Deleta todas as dependências do participante em uma ordem segura
-        console.log(` -> Deletando resultados de desafios...`);
-        await client.query('DELETE FROM social_challenge_results WHERE participant_id = $1', [id]);
+        // --- DELEÇÃO EM CASCATA CORRIGIDA ---
+        // Usa os nomes de tabela do seu `challenges.js` e outras tabelas sociais.
+
+        console.log(` -> Deletando participações em desafios (tabela: challenge_participants)...`);
+        await client.query('DELETE FROM challenge_participants WHERE participant_id = $1', [id]);
+
+        console.log(` -> Deletando desafios onde ele é o criador (tabela: challenges)...`);
+        await client.query('DELETE FROM challenges WHERE creator_id = $1', [id]);
         
-        console.log(` -> Deletando desafios onde ele é criador ou oponente...`);
-        await client.query('DELETE FROM social_challenges WHERE creator_id = $1 OR opponent_id = $1', [id]);
-        
+        // O restante das tabelas sociais que já tínhamos identificado
         console.log(` -> Deletando matches...`);
         await client.query('DELETE FROM social_matches WHERE user_id_1 = $1 OR user_id_2 = $1', [id]);
         
@@ -239,23 +244,22 @@ router.delete('/delete-participant/:id', async (req, res) => {
         const result = await client.query('DELETE FROM participants WHERE id = $1', [id]);
 
         if (result.rowCount === 0) {
-            // Se o participante não foi encontrado, ainda assim não é um erro fatal.
-            // Podemos apenas avisar e comitar as outras exclusões.
             console.log(` -> Aviso: Participante com ID ${id} não foi encontrado na tabela principal, mas as dependências foram limpas.`);
         }
 
-        await client.query('COMMIT'); // Confirma todas as exclusões se tudo deu certo
+        await client.query('COMMIT');
         console.log(`[SUPER ADMIN] Participante ID: ${id} e todos os seus dados foram deletados com sucesso.`);
         res.json({ success: true, message: 'Participante e todos os seus dados foram excluídos com sucesso.' });
 
     } catch (err) {
-        await client.query('ROLLBACK'); // Desfaz tudo se houver qualquer erro no meio do caminho
+        await client.query('ROLLBACK');
         console.error(`[SUPER ADMIN] Erro ao deletar participante ID: ${id}. Transação revertida.`, err);
         res.status(500).json({ error: 'Erro no servidor ao deletar participante.', details: err.message });
     } finally {
-        client.release(); // Libera a conexão com o banco de dados
+        client.release();
     }
 });
+
 
 
 // ROTA PARA DELETAR UMA SESSÃO (aula)
