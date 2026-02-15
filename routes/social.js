@@ -1230,6 +1230,27 @@ router.post('/messages/mark-as-read', validateDBSession, async (req, res) => {
         res.status(500).json({ error: 'Erro interno.' });
     }
 });
+// ADICIONE ESTA NOVA ROTA AO SEU social.js
+router.put('/profile/photo', validateDBSession, async (req, res) => {
+    const { photo } = req.body; // Espera a foto em base64
+    const userId = req.user.participant_id;
+
+    if (!photo) {
+        return res.status(400).json({ error: 'Nenhum dado de foto enviado.' });
+    }
+
+    try {
+        await pool.query(
+            'UPDATE participants SET photo = $1 WHERE id = $2',
+            [photo, userId]
+        );
+        console.log(`[API SOCIAL] Foto de perfil do usuário ${userId} atualizada com sucesso.`);
+        res.status(200).json({ success: true, message: 'Foto de perfil atualizada.' });
+    } catch (err) {
+        console.error('[API SOCIAL] Erro ao atualizar foto de perfil:', err);
+        res.status(500).json({ error: 'Erro interno ao atualizar a foto.' });
+    }
+});
 
 router.get('/search-users', validateDBSession, async (req, res) => {
   const { q } = req.query;
