@@ -361,6 +361,44 @@ router.post('/photos/:photoId/post-to-feed', validateDBSession, async (req, res)
     res.status(500).json({ error: 'Erro ao postar foto' });
   }
 });
+// ==================================================
+// NOVA ROTA PARA DELETAR UMA FOTO DO ÁLBUM
+// ==================================================
+router.delete('/photos/:photoId', validateDBSession, async (req, res) => {
+    const { photoId } = req.params;
+    const userId = req.user.participant_id;
+
+    console.log(`[API PHOTOS] Usuário ${userId} tentando deletar a foto ID: ${photoId}`);
+
+    try {
+        // Primeiro, verifica se a foto existe e se pertence ao usuário logado
+        const photoCheck = await pool.query(
+            'SELECT user_id FROM social_photos WHERE id = $1',
+            [photoId]
+        );
+
+        if (photoCheck.rows.length === 0) {
+            console.log(`[API PHOTOS] Foto ${photoId} não encontrada.`);
+            return res.status(404).json({ error: 'Foto não encontrada.' });
+        }
+
+        if (photoCheck.rows[0].user_id !== userId) {
+            console.log(`[API PHOTOS] Acesso negado. Usuário ${userId} não é dono da foto ${photoId}.`);
+            return res.status(403).json({ error: 'Você não tem permissão para excluir esta foto.' });
+        }
+
+        // Se tudo estiver OK, deleta a foto.
+        // Os comentários serão deletados automaticamente por causa do "ON DELETE CASCADE" que definimos na tabela de comentários.
+        await pool.query('DELETE FROM social_photos WHERE id = $1', [photoId]);
+
+        console.log(`[API PHOTOS] Foto ${photoId} deletada com sucesso.`);
+        res.status(200).json({ success: true, message: 'Foto excluída com sucesso.' });
+
+    } catch (err) {
+        console.error('[API PHOTOS] Erro ao deletar foto:', err);
+        res.status(500).json({ error: 'Erro interno ao excluir a foto.' });
+    }
+});
 
 router.get('/photos/:userId', validateDBSession, async (req, res) => {
   const targetId = req.params.userId;
