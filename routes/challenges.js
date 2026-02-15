@@ -147,24 +147,58 @@ module.exports = function(pool) {
     }
   });
 
-  router.post("/:id/respond", validateDBSession, async (req, res) => {
+  // SUBSTITUA SUA ROTA /:id/respond POR ESTA
+router.post("/:id/respond", validateDBSession, async (req, res) => {
     const { action } = req.body;
     const challengeId = req.params.id;
     const userId = req.user.participant_id;
     console.log(`[CHALLENGE DEBUG] Respondendo ao desafio ${challengeId}: ${action}`);
 
+    const client = await pool.connect();
     try {
-      await pool.query(
-        "UPDATE challenge_participants SET status = $1 WHERE challenge_id = $2 AND participant_id = $3",
-        [action, challengeId, userId]
-      );
-      console.log("[CHALLENGE DEBUG] Resposta salva com sucesso.");
-      res.json({ success: true });
+        await client.query('BEGIN');
+
+        // Atualiza o status do participante (accepted ou declined)
+        await client.query(
+            "UPDATE challenge_participants SET status = $1 WHERE challenge_id = $2 AND participant_id = $3",
+            [action, challengeId, userId]
+        );
+        console.log("[CHALLENGE DEBUG] Resposta do participante salva com sucesso.");
+
+        // Se a ação for 'accepted', verifica se o desafio pode iniciar
+        if (action === 'accepted') {
+            console.log("[CHALLENGE DEBUG] Verificando se todos os participantes aceitaram...");
+            const participantsStatus = await client.query(
+                "SELECT status FROM challenge_participants WHERE challenge_id = $1",
+                [challengeId]
+            );
+
+            // Verifica se existe algum participante que ainda não aceitou (está 'invited')
+            const allAccepted = participantsStatus.rows.every(p => p.status === 'accepted');
+
+            if (allAccepted) {
+                console.log(`[CHALLENGE DEBUG] Todos aceitaram! Iniciando desafio ${challengeId} automaticamente.`);
+                await client.query(
+                    "UPDATE challenges SET status = 'active' WHERE id = $1 AND status = 'pending'",
+                    [challengeId]
+                );
+            } else {
+                console.log("[CHALLENGE DEBUG] Ainda há participantes pendentes.");
+            }
+        }
+
+        await client.query('COMMIT');
+        res.json({ success: true });
+
     } catch (err) {
-      console.error("[CHALLENGE DEBUG] Erro ao responder convite:", err.message);
-      res.status(500).json({ error: "Erro ao responder convite: " + err.message });
+        await client.query('ROLLBACK');
+        console.error("[CHALLENGE DEBUG] Erro ao responder convite:", err.message);
+        res.status(500).json({ error: "Erro ao responder convite: " + err.message });
+    } finally {
+        client.release();
     }
-  });
+});
+
 
   router.post("/:id/start", validateDBSession, async (req, res) => {
     const challengeId = req.params.id;
@@ -211,6 +245,47 @@ module.exports = function(pool) {
       res.status(500).json({ error: "Erro ao excluir desafio: " + err.message });
     }
   });
+// ADICIONE ESTA NOVA ROTA AO FINAL DO SEU challenges.js
+router.post("/:id/add-participants", validateDBSession, async (req, res) => {
+    const challengeId = req.params.id;
+    const creatorId = req.user.participant_id;
+    const { newParticipantIds } = req.body; // Espera um array de IDs
+
+    if (!newParticipantIds || !Array.isArray(newParticipantIds) || newParticipantIds.length === 0) {
+        return res.status(400).json({ error: "É necessário fornecer um array de IDs de novos participantes." });
+    }
+
+    console.log(`[CHALLENGE DEBUG] Adicionando ${newParticipantIds.length} novos participantes ao desafio ${challengeId}`);
+
+    try {
+        // 1. Verifica se o usuário é o criador do desafio
+        const challengeRes = await pool.query("SELECT creator_id FROM challenges WHERE id = $1", [challengeId]);
+        if (challengeRes.rows.length === 0) {
+            return res.status(404).json({ error: "Desafio não encontrado." });
+        }
+        if (challengeRes.rows[0].creator_id !== creatorId) {
+            return res.status(403).json({ error: "Apenas o criador pode adicionar participantes." });
+        }
+
+        // 2. Adiciona os novos participantes com status 'invited'
+        // A cláusula ON CONFLICT IGNORE evita erros se o usuário já estiver no desafio
+        for (const pId of newParticipantIds) {
+            await pool.query(
+                `INSERT INTO challenge_participants (challenge_id, participant_id, status) 
+                 VALUES ($1, $2, 'invited')
+                 ON CONFLICT (challenge_id, participant_id) DO NOTHING`,
+                [challengeId, pId]
+            );
+        }
+
+        console.log(`[CHALLENGE DEBUG] Participantes adicionados com sucesso ao desafio ${challengeId}.`);
+        res.status(200).json({ success: true, message: "Convites enviados aos novos participantes." });
+
+    } catch (err) {
+        console.error("[CHALLENGE DEBUG] Erro ao adicionar participantes:", err.message);
+        res.status(500).json({ error: "Erro interno ao adicionar participantes." });
+    }
+});
 
   router.get("/:id/ranking", validateDBSession, async (req, res) => {
     const challengeId = req.params.id;
