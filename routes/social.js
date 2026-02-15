@@ -557,21 +557,44 @@ router.get('/matches/list', validateDBSession, async (req, res) => {
   }
 });
 
+// SUBSTITUA A ROTA DE CANDIDATOS ANTIGA POR ESTA VERSÃO APRIMORADA
+
 router.get('/candidates', validateDBSession, async (req, res) => {
+  // 1. Pega o parâmetro 'gender' da URL (?gender=M ou ?gender=F)
+  const { gender } = req.query;
+  
+  console.log(`[API CANDIDATES] Buscando candidatos. Filtro de gênero: ${gender || 'Nenhum'}`);
+
   try {
-    const result = await pool.query(`
+    // 2. Monta a query SQL dinamicamente
+    let queryText = `
       SELECT id, name, photo, age, box_id 
       FROM participants 
       WHERE id != $1 
       AND photo IS NOT NULL
-      ORDER BY RANDOM()
-      LIMIT 5
-    `, [req.user.participant_id]);
+    `;
+    const queryParams = [req.user.participant_id];
+
+    // 3. Se um filtro de gênero foi fornecido, adiciona a condição à query
+    if (gender && ['M', 'F'].includes(gender.toUpperCase())) {
+      queryText += ` AND gender = $2`;
+      queryParams.push(gender.toUpperCase());
+    }
+
+    // 4. Adiciona a ordenação aleatória e o limite
+    queryText += ` ORDER BY RANDOM() LIMIT 20`; // Aumentei o limite para garantir mais resultados
+
+    const result = await pool.query(queryText, queryParams);
+    
+    console.log(`[API CANDIDATES] Encontrados ${result.rows.length} candidatos com o filtro aplicado.`);
     res.json(result.rows);
+
   } catch (err) {
+    console.error('[API CANDIDATES] Erro ao buscar candidatos:', err);
     res.status(500).json({ error: err.message });
   }
 });
+
 
 router.post('/match', validateDBSession, async (req, res) => {
   const { targetId, action } = req.body;
