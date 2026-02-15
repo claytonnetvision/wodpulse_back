@@ -399,6 +399,85 @@ router.delete('/photos/:photoId', validateDBSession, async (req, res) => {
         res.status(500).json({ error: 'Erro interno ao excluir a foto.' });
     }
 });
+// ==================================================
+// ROTAS PARA COMENTÁRIOS NAS FOTOS
+// ==================================================
+
+// ROTA PARA BUSCAR COMENTÁRIOS DE UMA FOTO
+router.get('/photos/:photoId/comments', validateDBSession, async (req, res) => {
+    const { photoId } = req.params;
+    try {
+        const result = await pool.query(`
+            SELECT c.*, p.name as user_name, p.photo as user_photo
+            FROM social_photo_comments c
+            JOIN participants p ON c.user_id = p.id
+            WHERE c.photo_id = $1
+            ORDER BY c.created_at ASC
+        `, [photoId]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Erro ao buscar comentários da foto:', err);
+        res.status(500).json({ error: 'Erro interno ao buscar comentários.' });
+    }
+});
+
+// ROTA PARA POSTAR UM NOVO COMENTÁRIO
+router.post('/photos/:photoId/comments', validateDBSession, async (req, res) => {
+    const { photoId } = req.params;
+    const { content } = req.body;
+    const userId = req.user.participant_id;
+
+    if (!content) {
+        return res.status(400).json({ error: 'O conteúdo do comentário não pode ser vazio.' });
+    }
+
+    try {
+        const result = await pool.query(
+            'INSERT INTO social_photo_comments (photo_id, user_id, content) VALUES ($1, $2, $3) RETURNING *',
+            [photoId, userId, content]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('Erro ao postar comentário:', err);
+        res.status(500).json({ error: 'Erro interno ao postar comentário.' });
+    }
+});
+
+// NOVA ROTA PARA DELETAR UM COMENTÁRIO
+router.delete('/comments/:commentId', validateDBSession, async (req, res) => {
+    const { commentId } = req.params;
+    const currentUserId = req.user.participant_id;
+
+    try {
+        // Busca o comentário para saber quem é o autor e de quem é a foto
+        const commentRes = await pool.query(`
+            SELECT c.user_id as comment_author_id, p.user_id as photo_owner_id
+            FROM social_photo_comments c
+            JOIN social_photos p ON c.photo_id = p.id
+            WHERE c.id = $1
+        `, [commentId]);
+
+        if (commentRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Comentário não encontrado.' });
+        }
+
+        const { comment_author_id, photo_owner_id } = commentRes.rows[0];
+
+        // Regra de permissão: Pode deletar se for o autor do comentário OU o dono da foto.
+        if (currentUserId !== comment_author_id && currentUserId !== photo_owner_id) {
+            return res.status(403).json({ error: 'Você não tem permissão para excluir este comentário.' });
+        }
+
+        // Se a permissão for concedida, deleta o comentário.
+        await pool.query('DELETE FROM social_photo_comments WHERE id = $1', [commentId]);
+
+        res.status(200).json({ success: true, message: 'Comentário excluído com sucesso.' });
+
+    } catch (err) {
+        console.error('Erro ao deletar comentário:', err);
+        res.status(500).json({ error: 'Erro interno ao excluir comentário.' });
+    }
+});
 
 router.get('/photos/:userId', validateDBSession, async (req, res) => {
   const targetId = req.params.userId;
