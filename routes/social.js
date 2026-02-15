@@ -973,6 +973,9 @@ router.get('/user-history', validateDBSession, async (req, res) => {
 // SUBSTITUA AS DUAS ROTAS DE CHAT ANTIGAS POR ESTAS VERSÕES CORRIGIDAS
 
 // ROTA PARA BUSCAR MENSAGENS DE UMA CONVERSA (CORRIGIDA)
+// SUBSTITUA AS DUAS ROTAS DE CHAT PELAS VERSÕES FINAIS E CORRIGIDAS
+
+// ROTA PARA BUSCAR MENSAGENS DE UMA CONVERSA (USA "message")
 router.get('/messages/:friendId', validateDBSession, async (req, res) => {
     const { friendId } = req.params;
     const selfId = req.user.participant_id;
@@ -980,16 +983,21 @@ router.get('/messages/:friendId', validateDBSession, async (req, res) => {
     console.log(`[CHAT API] Buscando mensagens entre ${selfId} e ${friendId}`);
 
     try {
-        // CORREÇÃO: Selecionando todas as colunas explicitamente para evitar erros.
+        // CORREÇÃO: Trocamos "content" por "message" para corresponder à sua tabela.
         const result = await pool.query(`
-            SELECT id, sender_id, receiver_id, content, is_read, created_at 
+            SELECT id, sender_id, receiver_id, message, is_read, created_at 
             FROM social_messages
             WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)
             ORDER BY created_at ASC
         `, [selfId, friendId]);
         
         console.log(`[CHAT API] Encontradas ${result.rows.length} mensagens.`);
-        res.json(result.rows);
+        // Para o frontend não quebrar, renomeamos "message" para "content" na resposta.
+        const messagesWithContent = result.rows.map(row => ({
+            ...row,
+            content: row.message 
+        }));
+        res.json(messagesWithContent);
 
     } catch (err) {
         console.error('[CHAT API] Erro ao buscar mensagens:', err);
@@ -997,21 +1005,21 @@ router.get('/messages/:friendId', validateDBSession, async (req, res) => {
     }
 });
 
-// ROTA PARA ENVIAR UMA MENSAGEM (CORRIGIDA)
+// ROTA PARA ENVIAR UMA MENSAGEM (USA "message")
 router.post('/messages/send', validateDBSession, async (req, res) => {
-    const { receiverId, content } = req.body;
+    const { receiverId, content } = req.body; // O frontend ainda envia "content"
     const senderId = req.user.participant_id;
 
     console.log(`[CHAT API] Recebida mensagem de ${senderId} para ${receiverId}: "${content}"`);
 
     if (!receiverId || !content) {
-        console.log('[CHAT API] Erro: Dados incompletos.');
         return res.status(400).json({ error: 'receiverId e content são obrigatórios.' });
     }
 
     try {
+        // CORREÇÃO: Inserimos na coluna "message" o valor que vem do "content" do frontend.
         const result = await pool.query(
-            'INSERT INTO social_messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *',
+            'INSERT INTO social_messages (sender_id, receiver_id, message) VALUES ($1, $2, $3) RETURNING *',
             [senderId, receiverId, content]
         );
         
@@ -1023,6 +1031,7 @@ router.post('/messages/send', validateDBSession, async (req, res) => {
         res.status(500).json({ error: 'Erro interno ao enviar mensagem.', details: err.message });
     }
 });
+
 
 // ROTA PARA BUSCAR COMENTÁRIOS DE UMA FOTO
 router.get('/photos/:photoId/comments', validateDBSession, async (req, res) => {
