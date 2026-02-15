@@ -1032,6 +1032,51 @@ router.post('/messages/send', validateDBSession, async (req, res) => {
     }
 });
 
+// NOVA ROTA PARA NOTIFICAÇÕES DE MENSAGENS NÃO LIDAS
+router.get('/messages/notifications', validateDBSession, async (req, res) => {
+    const selfId = req.user.participant_id;
+
+    try {
+        // Esta query busca a última mensagem não lida de cada conversa
+        // e agrupa pelo remetente, contando quantas mensagens não lidas cada um enviou.
+        const result = await pool.query(`
+            SELECT 
+                sender_id,
+                p.name as sender_name,
+                p.photo as sender_photo,
+                COUNT(*) as unread_count,
+                MAX(created_at) as last_message_time
+            FROM social_messages sm
+            JOIN participants p ON sm.sender_id = p.id
+            WHERE sm.receiver_id = $1 AND sm.is_read = FALSE
+            GROUP BY sender_id, p.name, p.photo
+            ORDER BY last_message_time DESC
+        `, [selfId]);
+
+        res.json(result.rows);
+
+    } catch (err) {
+        console.error('[API NOTIFICATIONS] Erro ao buscar notificações de mensagens:', err);
+        res.status(500).json({ error: 'Erro interno ao buscar notificações.' });
+    }
+});
+
+// ROTA ADICIONAL: Marcar mensagens como lidas ao abrir um chat
+router.post('/messages/mark-as-read', validateDBSession, async (req, res) => {
+    const { friendId } = req.body;
+    const selfId = req.user.participant_id;
+
+    try {
+        await pool.query(
+            'UPDATE social_messages SET is_read = TRUE WHERE sender_id = $1 AND receiver_id = $2 AND is_read = FALSE',
+            [friendId, selfId]
+        );
+        res.status(200).json({ success: true, message: 'Mensagens marcadas como lidas.' });
+    } catch (err) {
+        console.error('[API MARK READ] Erro ao marcar mensagens como lidas:', err);
+        res.status(500).json({ error: 'Erro interno.' });
+    }
+});
 
 // ROTA PARA BUSCAR COMENTÁRIOS DE UMA FOTO
 router.get('/photos/:photoId/comments', validateDBSession, async (req, res) => {
